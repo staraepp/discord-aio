@@ -1,0 +1,139 @@
+# Single guild, one bot process, one dashboard, one database.
+# Secrets come from .env (never baked into images). Start with:
+#   docker compose up -d postgres
+#   docker compose --profile tools run --rm migrate
+#   docker compose up -d
+# Optional services are switched on with COMPOSE_PROFILES in .env, e.g. COMPOSE_PROFILES=tunnel,music
+#   tunnel: Cloudflare Tunnel, the only way in from the internet (no ports are opened on the server)
+#   music:  Lavalink audio backend
+#   home-music: link to the optional home music node over Tailscale (see docker/home-node)
+#   backup: nightly PostgreSQL dumps kept for 14 days (restore steps in DEV_NOTES.md)
+name: discord-aio
+
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-aio}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    # Not published to the host by default. Uncomment for local tools:
+    # ports: ['127.0.0.1:5432:5432']
+
+  backup:
+    image: postgres:17
+    restart: unless-stopped
+    profiles: ['backup']
+    entrypoint: ['/bin/sh', '/backup.sh']
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aio}
+      POSTGRES_DB: ${POSTGRES_DB:-aio}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - ./docker/backup/backup.sh:/backup.sh:ro
+      # Docker-managed volume, so deploys that sync the code folder never touch the dumps.
+      - pgbackups:/backups
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  migrate:
+    build: { context: ., target: migrate }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aio}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: 'no'
+    profiles: ['tools']
+
+  bot:
+    build: { context: ., target: bot }
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aio}
+      LAVALINK_URL: ${LAVALINK_URL:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+    stop_grace_period: 20s
+
+  web:
+    build: { context: ., target: web }
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-aio}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aio}
+    depends_on:
+      postgres: { condition: service_healthy }
+    # No published ports: the dashboard is reached only through the tunnel below.
+    # For local testing without a tunnel, add a compose override with ports: ['127.0.0.1:3000:3000'].
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2
+    restart: unless-stopped
+    profiles: ['music']
+    environment:
+      _JAVA_OPTIONS: -Xmx1G
+      SERVER_PORT: 2333
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_PASSWORD:?Set LAVALINK_PASSWORD in .env}
+      # Optional YouTube sign-in (see docker/lavalink/application.yml). Empty = device-code login.
+      PLUGINS_YOUTUBE_OAUTH_REFRESHTOKEN: ${YOUTUBE_OAUTH_REFRESH_TOKEN:-}
+      PLUGINS_YOUTUBE_REMOTECIPHER_PASSWORD: ${YT_CIPHER_PASSWORD:-}
+    depends_on: [yt-cipher]
+    volumes:
+      - ./docker/lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      # Docker-managed volume so the non-root Lavalink user can write downloaded plugins.
+      - lavalink-plugins:/opt/Lavalink/plugins
+    # Reachable from the bot as http://lavalink:2333 (set LAVALINK_URL accordingly).
+
+  # Decodes YouTube's scrambled stream URLs for Lavalink (wraps yt-dlp's decoder). Internal only.
+  # Pinned by digest; to update when YouTube breaks playback again, pull the newest
+  # ghcr.io/kikkia/yt-cipher:master and replace the digest.
+  yt-cipher:
+    image: ghcr.io/kikkia/yt-cipher:master@sha256:4c5ec381ff57336cfc24822d2b526a5ad7cd0171f61065a1bbc87bb736842449
+    restart: unless-stopped
+    profiles: ['music']
+    environment:
+      OVERRIDE_PLAYER_VARIANT: IAS
+      MAX_THREADS: 2
+      API_TOKEN: ${YT_CIPHER_PASSWORD:-}
+
+  home-link:
+    build: ./docker/home-link
+    restart: unless-stopped
+    profiles: ['home-music']
+    environment:
+      # Empty = Tailscale prints a login link in `docker compose logs home-link` instead.
+      TS_AUTHKEY: ${TAILSCALE_AUTHKEY:-}
+      TS_HOSTNAME: aio-vps
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: 'true'
+      HOME_NODE_HOST: aio-home-music
+    volumes:
+      - home-link-state:/var/lib/tailscale
+    # Outbound-only. The bot reaches the home node as http://home-link:2333 (LAVALINK_HOME_URL).
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.3
+    restart: unless-stopped
+    profiles: ['tunnel']
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-} # cloudflared exits with an error if this is empty
+    depends_on: [web]
+    # Outbound-only connection to Cloudflare. In the Cloudflare dashboard, route the public hostname to http://web:3000.
+
+volumes:
+  pgdata:
+  pgbackups:
+  lavalink-plugins:
+  home-link-state:

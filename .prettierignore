@@ -1,0 +1,7 @@
+pnpm-lock.yaml
+packages/db/src/generated
+**/.next
+**/dist
+prisma/migrations
+BLUEPRINT.md
+AGENTS.md

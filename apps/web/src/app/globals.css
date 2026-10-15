@@ -1,0 +1,192 @@
+@import 'tailwindcss';
+
+/*
+ * Design tokens, in the spirit of GitBook: a calm light theme by default, a matching dark theme,
+ * one accent color, hairline borders and a narrow reading column.
+ * - accent: text-safe tint for links, active states, borders and soft fills (>= 4.5:1 on panels).
+ * - brand: solid fill for primary buttons and switches; white text on it is >= 4.5:1.
+ * The values below are the light theme; [data-theme='dark'] swaps them (see further down).
+ */
+@theme {
+  --color-bg: #ffffff;
+  --color-panel: #ffffff;
+  --color-panel-2: #f4f5f7;
+  --color-panel-3: #eaecf0;
+  --color-line: #e5e7eb;
+  --color-line-strong: #d1d5db;
+  --color-muted: #5b616e;
+  --color-text: #1a1d23;
+  --color-accent: #4c56d6;
+  --color-brand: #5865f2;
+  --color-brand-strong: #4752c4;
+  --color-good: #1a7f37;
+  --color-warn: #9a6700;
+  --color-bad: #cf222e;
+  --color-discord-bg: #313338;
+  --color-discord-embed: #2b2d31;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --radius-card: 12px;
+  --shadow-pop: 0 16px 40px -16px rgb(15 23 42 / 0.22), 0 2px 6px -2px rgb(15 23 42 / 0.08);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --animate-pop-in: pop-in 180ms var(--ease-out);
+  --animate-fade-in: fade-in 160ms ease-out;
+  --animate-slide-in: slide-in 200ms var(--ease-out);
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px) scale(0.98);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes slide-in {
+    from {
+      transform: translateX(-100%);
+    }
+  }
+  @keyframes shimmer {
+    50% {
+      opacity: 0.55;
+    }
+  }
+}
+
+:root {
+  color-scheme: light;
+}
+
+/* The theme script in the root layout sets data-theme before the first paint (no flash). */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #111214;
+  --color-panel: #17181c;
+  --color-panel-2: #1f2126;
+  --color-panel-3: #282a31;
+  --color-line: #2a2d34;
+  --color-line-strong: #3b3f48;
+  --color-muted: #a2a7b3;
+  --color-text: #eceef2;
+  --color-accent: #939bff;
+  --color-good: #4fcb8c;
+  --color-warn: #f0b44c;
+  --color-bad: #f47272;
+  --shadow-pop: 0 16px 40px -16px rgb(0 0 0 / 0.7), 0 2px 6px -2px rgb(0 0 0 / 0.45);
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+/* Tailwind v4 resets buttons to the default cursor; interactive controls should show a pointer. */
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']),
+[role='tab'],
+[role='switch']:not(:disabled),
+select:not(:disabled),
+summary,
+label[for] {
+  cursor: pointer;
+}
+
+/* In the base layer so a component can opt out with outline utilities (the search box does). */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-brand) 45%, transparent);
+}
+
+/* Keep focused controls and anchored headings clear of the sticky header and the save bar. */
+html {
+  scroll-padding-top: 5rem;
+  scroll-padding-bottom: 5.5rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Data tables inside the dashboard: readable rows, aligned numbers, subtle hover. */
+@layer components {
+  main table {
+    /* Contain absolutely positioned screen-reader text so it can't widen the page. */
+    position: relative;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  main table thead th {
+    border-bottom: 1px solid var(--color-line-strong);
+    padding-block: 0.625rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  main table tbody tr {
+    border-bottom: 1px solid var(--color-line);
+    transition: background-color 120ms;
+  }
+  main table tbody tr:last-child {
+    border-bottom: 0;
+  }
+  main table tbody tr:hover {
+    background: color-mix(in srgb, var(--color-panel-2) 60%, transparent);
+  }
+  main table tbody td {
+    padding-block: 0.625rem;
+  }
+}
+
+.discord-md a {
+  color: #00a8fc;
+}
+.discord-md code {
+  background: #1e1f22;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}

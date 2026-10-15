@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+**/node_modules
+**/dist
+**/.next
+packages/db/src/generated
+.git
+coverage
+*.log
+docker/lavalink/plugins

@@ -1,0 +1,65 @@
+# Home music node: Lavalink on a home internet connection, which YouTube doesn't block and
+# where SoundCloud plays full songs. It is reachable ONLY over the private Tailscale network
+# (no published ports, nothing opened on the router). Audio goes from here straight to
+# Discord's voice servers; the VPS bot only sends commands.
+#
+# Run from the repository root with the same .env the VPS uses:
+#   docker compose -f docker/home-node/compose.yaml --env-file .env up -d
+name: aio-home-node
+
+services:
+  tailscale:
+    image: tailscale/tailscale:v1.102.5
+    restart: unless-stopped
+    hostname: aio-home-music
+    environment:
+      TS_AUTHKEY: ${TAILSCALE_AUTHKEY:?Set TAILSCALE_AUTHKEY in .env}
+      TS_HOSTNAME: aio-home-music
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: 'true'
+      # Tailnet port 2333 -> Lavalink below (they share this container's network).
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./serve.json:/config/serve.json:ro
+
+  yt-cipher:
+    image: ghcr.io/kikkia/yt-cipher:master@sha256:4c5ec381ff57336cfc24822d2b526a5ad7cd0171f61065a1bbc87bb736842449
+    restart: unless-stopped
+    environment:
+      OVERRIDE_PLAYER_VARIANT: IAS
+      MAX_THREADS: 2
+      API_TOKEN: ${YT_CIPHER_PASSWORD:-}
+
+  # A fresh plugins volume is owned by root; Lavalink runs as uid 322 and must write to it.
+  plugins-permissions:
+    image: alpine:3.22
+    command: chown 322:322 /plugins
+    volumes:
+      - lavalink-plugins:/plugins
+    restart: 'no'
+
+  lavalink:
+    image: ghcr.io/lavalink-devs/lavalink:4.2.2
+    restart: unless-stopped
+    # Shares the Tailscale container's network: reachable only on the tailnet, and it can still
+    # reach yt-cipher by name because that container sits on this project's network.
+    network_mode: service:tailscale
+    depends_on:
+      tailscale: { condition: service_started }
+      yt-cipher: { condition: service_started }
+      plugins-permissions: { condition: service_completed_successfully }
+    environment:
+      _JAVA_OPTIONS: -Xmx1G
+      SERVER_PORT: 2333
+      SERVER_ADDRESS: 127.0.0.1
+      LAVALINK_SERVER_PASSWORD: ${LAVALINK_HOME_PASSWORD:?Set LAVALINK_HOME_PASSWORD in .env}
+      PLUGINS_YOUTUBE_OAUTH_REFRESHTOKEN: ${YOUTUBE_OAUTH_REFRESH_TOKEN:-}
+      PLUGINS_YOUTUBE_REMOTECIPHER_PASSWORD: ${YT_CIPHER_PASSWORD:-}
+    volumes:
+      - ../lavalink/application.yml:/opt/Lavalink/application.yml:ro
+      - lavalink-plugins:/opt/Lavalink/plugins
+
+volumes:
+  tailscale-state:
+  lavalink-plugins:

@@ -1,0 +1,20 @@
+# Secrets — never commit real bot, OAuth, backup-music, or AI provider credentials.
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+.next/
+out/
+coverage/
+*.tsbuildinfo
+.turbo/
+packages/db/src/generated/
+docker/lavalink/plugins/
+.DS_Store
+*.log
+
+# Assistant-specific configuration
+CLAUDE.md
+.claude/

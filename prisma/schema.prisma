@@ -1,0 +1,1072 @@
+// Discord AIO — single guild, one main bot, up to two optional music-only identities.
+// All Discord snowflakes are stored as strings.
+
+generator client {
+  provider     = "prisma-client"
+  output       = "../packages/db/src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Platform ─────────────────────────────
+
+model GuildConfig {
+  id                 String   @id // guild snowflake
+  staffRoleIds       String[] @default([])
+  musicStaffRoleIds  String[] @default([])
+  ticketStaffRoleIds String[] @default([])
+  auditLogChannelId  String?
+  /// Prefix, per-command rules (see core/customize commandSettingsSchema).
+  commandSettings    Json     @default("{}")
+  /// Reply color, nickname, status lines, reworded replies (botProfileSchema).
+  botProfile         Json     @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model ModuleConfig {
+  guildId   String
+  moduleId  String
+  enabled   Boolean  @default(false)
+  settings  Json     @default("{}")
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+
+  @@id([guildId, moduleId])
+}
+
+model GuildCounter {
+  guildId String
+  name    String
+  value   Int    @default(0)
+
+  @@id([guildId, name])
+}
+
+enum ActorType {
+  user
+  system
+  bot
+}
+
+model AuditLog {
+  id        String    @id @default(cuid())
+  guildId   String
+  actorId   String?
+  actorType ActorType @default(user)
+  module    String
+  action    String
+  targetId  String?
+  before    Json?
+  after     Json?
+  meta      Json?
+  createdAt DateTime  @default(now())
+
+  @@index([guildId, createdAt(sort: Desc)])
+  @@index([guildId, module, createdAt(sort: Desc)])
+  @@index([actorId])
+}
+
+model SavedEmbed {
+  id               String   @id @default(cuid())
+  guildId          String
+  name             String
+  template         Json
+  /// Action-engine actions per component key (buttons/selects in the template).
+  componentActions Json     @default("{}")
+  createdBy        String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([guildId, name])
+  @@index([guildId])
+}
+
+/// Unsaved embed work, autosaved from the Discord editor and the dashboard so nothing is lost
+/// when an ephemeral editor disappears, the bot restarts or a tab closes. Pruned after 30 days.
+model EmbedDraft {
+  id               String   @id @default(cuid())
+  guildId          String
+  userId           String
+  /// Set when the draft edits an existing saved embed.
+  embedId          String?
+  name             String
+  template         Json
+  componentActions Json     @default("{}")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([guildId, userId, updatedAt])
+  @@index([updatedAt])
+}
+
+enum PanelKind {
+  verification
+  ticket
+  tempvc
+  rolepanel
+  music
+  embed
+  tempvc_controls
+  honeypot
+}
+
+/// Tracks every persistent bot message so it can be repaired/recreated after restarts.
+model PersistentPanel {
+  id        String    @id @default(cuid())
+  guildId   String
+  kind      PanelKind
+  refId     String
+  channelId String
+  messageId String?
+  updatedAt DateTime  @updatedAt
+  createdAt DateTime  @default(now())
+
+  @@unique([kind, refId])
+  @@index([guildId, kind])
+  @@index([messageId])
+}
+
+enum DashboardCommandStatus {
+  pending
+  processing
+  done
+  failed
+}
+
+/// Web → bot work queue (LISTEN/NOTIFY + polling). Discord mutations stay in the bot process.
+model DashboardCommand {
+  id          String                 @id @default(cuid())
+  guildId     String
+  type        String
+  payload     Json                   @default("{}")
+  createdBy   String?
+  status      DashboardCommandStatus @default(pending)
+  result      Json?
+  error       String?
+  attempts    Int                    @default(0)
+  createdAt   DateTime               @default(now())
+  processedAt DateTime?
+
+  @@index([status, createdAt])
+}
+
+model BotHeartbeat {
+  id        String   @id // "main", "music-2", "music-3"
+  online    Boolean  @default(false)
+  botUserId String?
+  botTag    String?
+  latencyMs Int?
+  details   Json     @default("{}")
+  startedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AppErrorLog {
+  id        String   @id @default(cuid())
+  errorId   String
+  source    String
+  message   String
+  context   Json?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
+  @@index([errorId])
+}
+
+model DashboardSession {
+  id        String    @id @default(cuid())
+  userId    String
+  username  String
+  avatar    String?
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+
+  @@index([userId])
+}
+
+// ───────────────────────────── Autoresponders ─────────────────────────────
+
+enum MatchMode {
+  exact
+  starts_with
+  ends_with
+  contains
+  regex
+}
+
+enum AutoresponderResponseType {
+  text
+  embed
+  random
+  actions_only
+}
+
+model Autoresponder {
+  id                         String                    @id @default(cuid())
+  guildId                    String
+  name                       String
+  enabled                    Boolean                   @default(true)
+  trigger                    String
+  matchMode                  MatchMode                 @default(contains)
+  caseSensitive              Boolean                   @default(false)
+  responseType               AutoresponderResponseType @default(text)
+  responses                  String[]                  @default([])
+  embedId                    String?
+  allowedChannelIds          String[]                  @default([])
+  blockedChannelIds          String[]                  @default([])
+  allowedRoleIds             String[]                  @default([])
+  blockedRoleIds             String[]                  @default([])
+  cooldownSeconds            Int                       @default(0)
+  deleteTrigger              Boolean                   @default(false)
+  deleteResponseAfterSeconds Int?
+  logUses                    Boolean                   @default(false)
+  priority                   Int                       @default(0)
+  createdAt                  DateTime                  @default(now())
+  updatedAt                  DateTime                  @updatedAt
+  actions                    AutoresponderAction[]
+
+  @@index([guildId, enabled])
+}
+
+model AutoresponderAction {
+  id              String        @id @default(cuid())
+  autoresponderId String
+  position        Int
+  type            String
+  config          Json          @default("{}")
+  autoresponder   Autoresponder @relation(fields: [autoresponderId], references: [id], onDelete: Cascade)
+
+  @@index([autoresponderId, position])
+}
+
+// ───────────────────────────── Music ─────────────────────────────
+
+model MusicPlayerIdentity {
+  slot      Int      @id // 1 = main bot, 2/3 optional music-only bots
+  botUserId String?
+  label     String
+  online    Boolean  @default(false)
+  lastError String?
+  updatedAt DateTime @updatedAt
+}
+
+enum MusicSessionKind {
+  public
+  temp
+}
+
+enum MusicSessionState {
+  idle
+  playing
+  paused
+  suspended // room emptied: queue preserved, player disconnected
+  stopped
+}
+
+enum LoopMode {
+  off
+  track
+  queue
+}
+
+model MusicSession {
+  id                String                @id @default(cuid())
+  guildId           String
+  voiceChannelId    String
+  textChannelId     String?
+  kind              MusicSessionKind      @default(public)
+  identitySlot      Int?
+  state             MusicSessionState     @default(idle)
+  /// Timeline cursor: position of the current entry. Entries below are history, above are pending.
+  cursor            Int                   @default(-1)
+  positionMs        Int                   @default(0)
+  positionUpdatedAt DateTime?
+  volume            Int                   @default(100)
+  loopMode          LoopMode              @default(off)
+  is247             Boolean               @default(false)
+  filters           Json?
+  nextPosition      Int                   @default(0)
+  lastActiveAt      DateTime              @default(now())
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  entries           MusicQueueEntry[]
+  panel             MusicNowPlayingPanel?
+
+  @@unique([guildId, voiceChannelId])
+  @@index([identitySlot])
+}
+
+model MusicQueueEntry {
+  id               String       @id @default(cuid())
+  sessionId        String
+  position         Int
+  requesterId      String
+  staffAdded       Boolean      @default(false)
+  title            String
+  author           String
+  durationMs       Int?
+  uri              String?
+  sourceName       String
+  encoded          String
+  artworkUrl       String?
+  isStream         Boolean      @default(false)
+  isSeekable       Boolean      @default(true)
+  isrc             String?
+  resolvedFrom     String?
+  originalUri      String?
+  substitutionNote String?
+  addedAt          DateTime     @default(now())
+  session          MusicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, position])
+}
+
+model MusicNowPlayingPanel {
+  sessionId       String       @id
+  channelId       String
+  messageId       String?
+  lyricsMessageId String?
+  lastEditedAt    DateTime?
+  session         MusicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+model MusicHistory {
+  id             String           @id @default(cuid())
+  guildId        String
+  voiceChannelId String
+  sessionKind    MusicSessionKind @default(public)
+  requesterId    String
+  title          String
+  author         String
+  uri            String?
+  sourceName     String
+  durationMs     Int?
+  playedAt       DateTime         @default(now())
+
+  @@index([guildId, playedAt(sort: Desc)])
+  @@index([guildId, requesterId])
+}
+
+/// Metadata only; lyric text itself is never bulk-stored (licensing).
+model MusicLyricsCacheMetadata {
+  id          String   @id @default(cuid())
+  trackKey    String   @unique
+  provider    String
+  found       Boolean
+  synced      Boolean  @default(false)
+  attribution String?
+  fetchedAt   DateTime @default(now())
+}
+
+// ───────────────────────────── Temporary voice ─────────────────────────────
+
+enum TempVisibility {
+  public
+  private
+  friends
+}
+
+model TempVoicePreset {
+  id           String         @id @default(cuid())
+  guildId      String
+  name         String
+  emoji        String?
+  nameTemplate String         @default("{emoji} {user.display_name}'s room")
+  userLimit    Int            @default(0)
+  bitrate      Int?
+  visibility   TempVisibility @default(public)
+  position     Int            @default(0)
+  createdAt    DateTime       @default(now())
+
+  @@unique([guildId, name])
+}
+
+model TempVoiceRoom {
+  channelId        String         @id
+  guildId          String
+  ownerId          String
+  categoryId       String?
+  visibility       TempVisibility @default(public)
+  locked           Boolean        @default(false)
+  hidden           Boolean        @default(false)
+  allowedUserIds   String[]       @default([])
+  presetId         String?
+  controlMessageId String?
+  /// Grace window: the room is not deleted before the creator had a chance to be moved in.
+  graceUntil       DateTime
+  createdAt        DateTime       @default(now())
+  deletedAt        DateTime?
+
+  @@index([guildId, deletedAt])
+  @@index([ownerId])
+}
+
+// ───────────────────────────── Leveling ─────────────────────────────
+
+model LevelProfile {
+  guildId         String
+  userId          String
+  xp              Int       @default(0)
+  level           Int       @default(0)
+  messageCount    Int       @default(0)
+  voiceMinutes    Int       @default(0)
+  lastMessageXpAt DateTime?
+  optedOut        Boolean   @default(false)
+  updatedAt       DateTime  @updatedAt
+
+  @@id([guildId, userId])
+  @@index([guildId, xp(sort: Desc)])
+}
+
+model LevelRoleReward {
+  id      String @id @default(cuid())
+  guildId String
+  level   Int
+  roleId  String
+
+  @@unique([guildId, level, roleId])
+}
+
+// ───────────────────────────── Forms ─────────────────────────────
+
+enum FormQuestionType {
+  section
+  short_text
+  long_text
+  single_choice
+  multiple_choice
+  dropdown
+  checkbox
+  number
+  date
+}
+
+enum FormSubmissionStatus {
+  new
+  reviewing
+  accepted
+  denied
+  archived
+}
+
+model Form {
+  id                   String           @id @default(cuid())
+  guildId              String
+  slug                 String           @unique
+  title                String
+  description          String           @default("")
+  accentColor          String           @default("#6d5dfc")
+  isOpen               Boolean          @default(false)
+  closedMessage        String           @default("This form is currently closed.")
+  successMessage       String           @default("Thanks! Your response has been recorded.")
+  allowEdit            Boolean          @default(false)
+  editConfirmationText String           @default("Save this private link if you want to edit your response later. Anyone with the link can edit it, so don't share it.")
+  createdBy            String?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+  questions            FormQuestion[]
+  submissions          FormSubmission[]
+
+  @@index([guildId])
+}
+
+model FormQuestion {
+  id          String           @id @default(cuid())
+  formId      String
+  position    Int
+  type        FormQuestionType
+  label       String
+  description String?
+  required    Boolean          @default(false)
+  options     String[]         @default([])
+  validation  Json             @default("{}")
+  form        Form             @relation(fields: [formId], references: [id], onDelete: Cascade)
+  answers     FormAnswer[]
+
+  @@index([formId, position])
+}
+
+model FormSubmission {
+  id         String               @id @default(cuid())
+  formId     String
+  status     FormSubmissionStatus @default(new)
+  adminNotes String?
+  searchText String               @default("")
+  createdAt  DateTime             @default(now())
+  updatedAt  DateTime             @updatedAt
+  editedAt   DateTime?
+  form       Form                 @relation(fields: [formId], references: [id], onDelete: Cascade)
+  answers    FormAnswer[]
+  editToken  FormEditTokenHash?
+
+  @@index([formId, createdAt(sort: Desc)])
+  @@index([formId, status])
+}
+
+model FormAnswer {
+  id           String         @id @default(cuid())
+  submissionId String
+  questionId   String
+  value        Json
+  submission   FormSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  question     FormQuestion   @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([submissionId, questionId])
+}
+
+model FormEditTokenHash {
+  id           String         @id @default(cuid())
+  submissionId String         @unique
+  tokenHash    String         @unique
+  createdAt    DateTime       @default(now())
+  lastUsedAt   DateTime?
+  submission   FormSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+}
+
+// ───────────────────────────── Moderation ─────────────────────────────
+
+enum CaseType {
+  warn
+  timeout
+  untimeout
+  kick
+  voicekick
+  ban
+  tempban
+  softban
+  unban
+  purge
+  slowmode
+  lock
+  unlock
+  lockdown
+  honeypot
+  automod
+}
+
+model ModerationCase {
+  id          String               @id @default(cuid())
+  guildId     String
+  caseNumber  Int
+  type        CaseType
+  targetId    String?
+  moderatorId String
+  reason      String?
+  durationMs  Int?
+  expiresAt   DateTime?
+  evidence    String?
+  messageLink String?
+  channelId   String?
+  active      Boolean              @default(true)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  deletedAt   DateTime?
+  deletedBy   String?
+  edits       ModerationCaseEdit[]
+
+  @@unique([guildId, caseNumber])
+  @@index([guildId, targetId])
+  @@index([guildId, type, active])
+  @@index([expiresAt])
+}
+
+model ModerationCaseEdit {
+  id        String         @id @default(cuid())
+  caseId    String
+  editorId  String
+  field     String
+  oldValue  String?
+  newValue  String?
+  createdAt DateTime       @default(now())
+  case      ModerationCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+}
+
+model ModerationNote {
+  id        String   @id @default(cuid())
+  guildId   String
+  targetId  String
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+
+  @@index([guildId, targetId])
+}
+
+// ───────────────────────────── Tickets ─────────────────────────────
+
+model TicketPanel {
+  id        String       @id @default(cuid())
+  guildId   String
+  name      String
+  template  Json
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  types     TicketType[]
+
+  @@unique([guildId, name])
+}
+
+model TicketType {
+  id                  String      @id @default(cuid())
+  panelId             String
+  position            Int         @default(0)
+  label               String
+  emoji               String?
+  style               String      @default("primary")
+  categoryId          String?
+  staffRoleIds        String[]    @default([])
+  questions           Json        @default("[]")
+  waitingNameTemplate String      @default("waiting-{user.name}")
+  handledNameTemplate String      @default("{staff.name}-{user.name}")
+  openingMessage      String      @default("Hi {user}, thanks for reaching out. A staff member will be with you soon.")
+  panel               TicketPanel @relation(fields: [panelId], references: [id], onDelete: Cascade)
+  tickets             Ticket[]
+
+  @@index([panelId, position])
+}
+
+enum TicketStatus {
+  open
+  closed
+}
+
+model Ticket {
+  id               String              @id @default(cuid())
+  guildId          String
+  number           Int
+  typeId           String?
+  openerId         String
+  channelId        String              @unique
+  status           TicketStatus        @default(open)
+  /// First staff member to send a message; set exactly once.
+  firstResponderId String?
+  /// True once the one-time handler rename has happened (or staff manually renamed).
+  nameLocked       Boolean             @default(false)
+  /// Current handler (takeover metadata). Never renames the channel.
+  handlerId        String?
+  answers          Json                @default("[]")
+  createdAt        DateTime            @default(now())
+  closedAt         DateTime?
+  closedById       String?
+  reopenedAt       DateTime?
+  type             TicketType?         @relation(fields: [typeId], references: [id], onDelete: SetNull)
+  participants     TicketParticipant[]
+  transcripts      TicketTranscript[]
+
+  @@unique([guildId, number])
+  @@index([guildId, status])
+  @@index([openerId])
+}
+
+model TicketParticipant {
+  ticketId  String
+  userId    String
+  addedById String
+  addedAt   DateTime  @default(now())
+  removedAt DateTime?
+  ticket    Ticket    @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, userId])
+}
+
+model TicketTranscript {
+  id           String   @id @default(cuid())
+  ticketId     String
+  createdById  String
+  messageCount Int
+  content      Json
+  createdAt    DateTime @default(now())
+  ticket       Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@index([ticketId])
+}
+
+// ───────────────────────────── Verification ─────────────────────────────
+
+enum VerificationAttemptResult {
+  pending
+  success
+  failed
+  expired
+  superseded
+}
+
+/// One-use signed verification session. Only hashes of the URL token / challenge answer are stored.
+model VerificationAttempt {
+  id            String                    @id @default(cuid())
+  guildId       String
+  userId        String
+  tokenHash     String                    @unique
+  challengeHash String?
+  createdAt     DateTime                  @default(now())
+  expiresAt     DateTime
+  consumedAt    DateTime?
+  result        VerificationAttemptResult @default(pending)
+  failureCount  Int                       @default(0)
+
+  @@index([guildId, userId, createdAt(sort: Desc)])
+}
+
+/// Per-member failure cycle and verification-only cooldown (never a Discord timeout).
+model VerificationCooldown {
+  guildId         String
+  userId          String
+  failuresInCycle Int       @default(0)
+  cyclesFailed    Int       @default(0)
+  cooldownUntil   DateTime?
+  verifiedAt      DateTime?
+  lastAttemptAt   DateTime?
+  pendingRoleSync Boolean   @default(false)
+  updatedAt       DateTime  @updatedAt
+
+  @@id([guildId, userId])
+}
+
+// ───────────────────────────── Role panels ─────────────────────────────
+
+enum RolePanelKind {
+  button
+  select
+  reaction
+}
+
+enum RoleOptionBehavior {
+  toggle
+  add
+  remove
+}
+
+model RolePanel {
+  id              String            @id @default(cuid())
+  guildId         String
+  name            String
+  kind            RolePanelKind     @default(button)
+  template        Json
+  exclusive       Boolean           @default(false)
+  maxRoles        Int?
+  requiredRoleIds String[]          @default([])
+  blockedRoleIds  String[]          @default([])
+  logChannelId    String?
+  placeholder     String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  options         RolePanelOption[]
+
+  @@unique([guildId, name])
+}
+
+model RolePanelOption {
+  id          String             @id @default(cuid())
+  panelId     String
+  position    Int                @default(0)
+  roleId      String
+  label       String
+  emoji       String?
+  description String?
+  style       String             @default("secondary")
+  behavior    RoleOptionBehavior @default(toggle)
+  panel       RolePanel          @relation(fields: [panelId], references: [id], onDelete: Cascade)
+
+  @@index([panelId, position])
+}
+
+// ───────────────────────────── AI helper ─────────────────────────────
+
+model AIChannelConfig {
+  guildId            String
+  channelId          String
+  channelName        String    @default("")
+  collect            Boolean   @default(true)
+  searchable         Boolean   @default(true)
+  attachments        Boolean   @default(false)
+  learnMemory        Boolean   @default(false)
+  historyDepth       Int       @default(0)
+  citationPriority   Int       @default(0)
+  isPrivate          Boolean   @default(false)
+  privateConfirmedBy String?
+  privateConfirmedAt DateTime?
+  lastBackfillAt     DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@id([guildId, channelId])
+}
+
+model AIIndexedMessage {
+  id          String                   @id // message snowflake
+  guildId     String
+  channelId   String
+  authorId    String
+  authorName  String
+  content     String
+  jumpUrl     String
+  createdAt   DateTime
+  editedAt    DateTime?
+  indexedAt   DateTime                 @default(now())
+  search      Unsupported("tsvector")?
+  attachments AIAttachmentReference[]
+
+  @@index([guildId, channelId, createdAt(sort: Desc)])
+  @@index([search], type: Gin)
+}
+
+model AIAttachmentReference {
+  id          String           @id @default(cuid())
+  messageId   String
+  url         String
+  filename    String
+  contentType String?
+  size        Int
+  description String?
+  expiresAt   DateTime?
+  message     AIIndexedMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+}
+
+enum AISummaryStatus {
+  active
+  stale
+  archived
+}
+
+model AISummary {
+  id               String          @id @default(cuid())
+  guildId          String
+  channelId        String
+  periodStart      DateTime
+  periodEnd        DateTime
+  content          String
+  sourceMessageIds String[]        @default([])
+  status           AISummaryStatus @default(active)
+  editedBy         String?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([guildId, channelId, periodEnd(sort: Desc)])
+}
+
+enum AIMemoryStatus {
+  proposed
+  learned
+  pinned
+  archived
+  superseded
+}
+
+model AIMemory {
+  id             String           @id @default(cuid())
+  guildId        String
+  kind           String           @default("fact")
+  title          String
+  content        String
+  confidence     Float            @default(0.5)
+  status         AIMemoryStatus   @default(proposed)
+  supersededById String?
+  createdBy      String           @default("ai")
+  provenance     String           @default("")
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  sources        AIMemorySource[]
+
+  @@index([guildId, status])
+}
+
+model AIMemorySource {
+  memoryId  String
+  messageId String
+  channelId String
+  jumpUrl   String
+  memory    AIMemory @relation(fields: [memoryId], references: [id], onDelete: Cascade)
+
+  @@id([memoryId, messageId])
+  @@index([messageId])
+  @@index([channelId])
+}
+
+model AIConversationTurn {
+  id        String   @id @default(cuid())
+  guildId   String
+  channelId String
+  userId    String
+  messageId String?
+  question  String
+  answer    String
+  citations Json     @default("[]")
+  createdAt DateTime @default(now())
+
+  @@index([guildId, channelId, createdAt(sort: Desc)])
+}
+
+model AIProviderEncryptedCredential {
+  id              String    @id @default(cuid())
+  guildId         String
+  provider        String
+  label           String
+  baseUrl         String?
+  encryptedKey    String
+  keyLast4        String
+  keyVersion      Int       @default(1)
+  priority        Int       @default(0)
+  enabled         Boolean   @default(true)
+  chatModel       String
+  escalationModel String?
+  visionModel     String?
+  extractionModel String?
+  lastTestAt      DateTime?
+  lastTestOk      Boolean?
+  lastError       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([guildId, priority])
+}
+
+model AIUsageLedger {
+  id               String   @id @default(cuid())
+  guildId          String
+  credentialId     String?
+  provider         String
+  model            String
+  purpose          String
+  inputTokens      Int      @default(0)
+  outputTokens     Int      @default(0)
+  estimatedCostUsd Decimal  @default(0) @db.Decimal(12, 6)
+  success          Boolean
+  errorCode        String?
+  latencyMs        Int?
+  createdAt        DateTime @default(now())
+
+  @@index([guildId, createdAt(sort: Desc)])
+}
+
+// ───────────────────────────── Honeypot ─────────────────────────────
+
+enum HoneypotAction {
+  delete_alert
+  kick
+  softban
+  ban
+}
+
+model HoneypotConfig {
+  guildId           String         @id
+  channelId         String?
+  action            HoneypotAction @default(delete_alert)
+  exemptRoleIds     String[]       @default([])
+  exemptUserIds     String[]       @default([])
+  logChannelId      String?
+  warningEmbedId    String?
+  deleteMessage     Boolean        @default(true)
+  actionConfirmedBy String?
+  updatedAt         DateTime       @updatedAt
+}
+
+/// Saved embed or text posted on a schedule (once, daily, weekly or every N minutes).
+model ScheduledMessage {
+  id        String    @id @default(cuid())
+  guildId   String
+  name      String
+  channelId String
+  embedId   String?
+  content   String?
+  /// scheduleSchema JSON; wall-clock times are in `timezone`.
+  schedule  Json
+  timezone  String
+  enabled   Boolean   @default(true)
+  nextRunAt DateTime?
+  lastRunAt DateTime?
+  lastError String?
+  runCount  Int       @default(0)
+  createdBy String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([enabled, nextRunAt])
+  @@index([guildId])
+}
+
+/// A message kept at the bottom of a channel: re-posted after people chat.
+model StickyMessage {
+  id            String   @id @default(cuid())
+  guildId       String
+  channelId     String   @unique
+  embedId       String?
+  content       String?
+  enabled       Boolean  @default(true)
+  delaySeconds  Int      @default(15)
+  lastMessageId String?
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([guildId])
+}
+
+// ── Community: giveaways, reminders, starboard ──
+
+model Giveaway {
+  id             String          @id @default(cuid())
+  guildId        String
+  channelId      String
+  messageId      String?
+  hostId         String
+  prize          String
+  description    String?
+  winnerCount    Int             @default(1)
+  requiredRoleId String?
+  endsAt         DateTime
+  /// Set once when the giveaway is drawn; the claim that stops two processes drawing twice.
+  endedAt        DateTime?
+  winnerIds      String[]        @default([])
+  createdAt      DateTime        @default(now())
+  entries        GiveawayEntry[]
+
+  @@index([guildId, endedAt, endsAt])
+}
+
+model GiveawayEntry {
+  giveawayId String
+  userId     String
+  enteredAt  DateTime @default(now())
+  giveaway   Giveaway @relation(fields: [giveawayId], references: [id], onDelete: Cascade)
+
+  @@id([giveawayId, userId])
+}
+
+model Reminder {
+  id              String    @id @default(cuid())
+  guildId         String
+  userId          String
+  /// Channel to post in; null sends a DM (falling back to the channel it was made in).
+  channelId       String?
+  originChannelId String
+  text            String
+  remindAt        DateTime
+  sentAt          DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([sentAt, remindAt])
+  @@index([guildId, userId, sentAt])
+}
+
+model StarboardPost {
+  /// The starred message.
+  messageId          String   @id
+  guildId            String
+  channelId          String
+  authorId           String
+  starboardMessageId String?
+  stars              Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([guildId, stars])
+}

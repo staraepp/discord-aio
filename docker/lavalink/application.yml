@@ -1,0 +1,71 @@
+# Lavalink v4 configuration. The password is supplied by the LAVALINK_SERVER_PASSWORD
+# environment variable (docker-compose maps it from LAVALINK_PASSWORD in .env).
+#
+# YouTube playback in Lavalink v4 is provided by the community youtube-source plugin.
+# The built-in YouTube source is disabled.
+#
+# Pinned to a SNAPSHOT build (a commit on the plugin's main branch) because release 1.18.2 fails
+# with "This video requires login" for every video, even from home connections; the maintainer
+# points users to snapshot builds plus a remote cipher server (lavalink-devs/youtube-source#240).
+# Switch back to a normal release once one newer than 1.18.2 is out:
+# https://github.com/lavalink-devs/youtube-source/releases
+server:
+  port: 2333
+  address: 0.0.0.0
+lavalink:
+  plugins:
+    - dependency: 'dev.lavalink.youtube:youtube-plugin:2be8e542d3f6f178e048dca565892684c2e40177'
+      snapshot: true
+  server:
+    sources:
+      youtube: false
+      bandcamp: true
+      soundcloud: true
+      twitch: false
+      vimeo: false
+      http: false
+      local: false
+    filters:
+      volume: true
+      equalizer: true
+      karaoke: true
+      timescale: true
+      tremolo: true
+      vibrato: true
+      distortion: true
+      rotation: true
+      channelMix: true
+      lowPass: true
+    bufferDurationMs: 400
+    frameBufferDurationMs: 5000
+    youtubePlaylistLoadLimit: 6
+    playerUpdateInterval: 5
+    youtubeSearchEnabled: true
+    soundcloudSearchEnabled: true
+plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    # YouTube blocks most datacenter IPs ("Sign in to confirm you're not a bot"). The TV client
+    # signed in with OAuth is the plugin's supported workaround, so it is tried last as the
+    # fallback. Use a BURNER Google account: the plugin warns the account can be terminated.
+    # First run with an empty token prints a google.com/device code in the Lavalink log; after
+    # you approve it the log prints a refresh token. Put that in YOUTUBE_OAUTH_REFRESH_TOKEN in .env
+    # (compose maps it to plugins.youtube.oauth.refreshToken) so it survives restarts.
+    clients: ['MUSIC', 'ANDROID_VR', 'WEB', 'WEBEMBEDDED', 'TV']
+    # YouTube's stream URLs are scrambled by player JavaScript that changes often. The plugin no
+    # longer decodes it itself; the yt-cipher service in docker-compose.yml does (it wraps yt-dlp's
+    # decoder). The password comes from YT_CIPHER_PASSWORD in .env
+    # (compose maps it to plugins.youtube.remoteCipher.password).
+    remoteCipher:
+      url: 'http://yt-cipher:8001/'
+      userAgent: 'discord-aio'
+    oauth:
+      enabled: true
+      skipInitialization: false
+logging:
+  level:
+    root: INFO
+    lavalink: INFO

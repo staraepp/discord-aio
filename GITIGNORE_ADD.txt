@@ -1,0 +1,7 @@
+Add these lines to your repository's existing .gitignore (do not replace other ignore rules):
+
+.env
+.env.*
+!.env.example
+
+Never commit real bot, OAuth, backup-music, or AI provider credentials.

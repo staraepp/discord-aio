@@ -1,0 +1,42 @@
+{
+  "name": "discord-aio",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@11.1.2",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev:bot": "pnpm --filter @aio/bot dev",
+    "dev:web": "pnpm --filter @aio/web dev",
+    "build": "pnpm db:generate && pnpm -r --filter \"./apps/*\" build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "pnpm db:generate && pnpm -r typecheck",
+    "test": "pnpm db:generate && vitest run",
+    "test:watch": "vitest",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:migrate:dev": "prisma migrate dev",
+    "db:reset": "prisma migrate reset --force",
+    "db:check": "node scripts/check-migrations.mjs",
+    "gen:secret": "node -e \"console.log(require('node:crypto').randomBytes(32).toString('base64'))\""
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
+    "prettier": "^3.9.9",
+    "pg": "^8.23.0",
+    "@types/pg": "^8.23.1",
+    "prisma": "7.10.0",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2",
+    "dotenv": "^18.0.4"
+  }
+}

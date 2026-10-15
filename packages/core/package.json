@@ -1,0 +1,20 @@
+{
+  "name": "@aio/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*/index.ts"
+  },
+  "scripts": { "typecheck": "tsc -p tsconfig.json" },
+  "dependencies": {
+    "@aio/config": "workspace:*",
+    "@aio/db": "workspace:*",
+    "@aio/discord-ui": "workspace:*",
+    "@aio/logging": "workspace:*",
+    "@aio/permissions": "workspace:*",
+    "@aio/variables": "workspace:*",
+    "zod": "^4.6.5"
+  }
+}
