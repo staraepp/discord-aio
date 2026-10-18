@@ -130,7 +130,7 @@ export const MODULES: ModuleDefinition[] = [
     name: 'Moderation',
     description: 'Staff tooling with cases, required reasons and no automatic escalation.',
     route: '/dashboard/moderation',
-    commands: ['warn', 'warnings', 'modhistory', 'case', 'note', 'timeout', 'untimeout', 'kick', 'voicekick', 'ban', 'tempban', 'softban', 'unban', 'purge', 'slowmode', 'lock', 'unlock', 'lockdown'],
+    commands: ['warn', 'warnings', 'modhistory', 'case', 'note', 'timeout', 'untimeout', 'kick', 'voicekick', 'ban', 'tempban', 'softban', 'unban', 'purge', 'slowmode', 'lock', 'unlock', 'lockdown', 'echo'],
     intents: ['Guilds', 'GuildMembers', 'GuildMessages', 'MessageContent'],
     botPermissions: ['KickMembers', 'BanMembers', 'ModerateMembers', 'ManageMessages', 'ManageChannels', 'MoveMembers'],
     settingsSchema: moderationSettingsSchema,

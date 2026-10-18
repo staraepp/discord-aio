@@ -3,6 +3,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
+  MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
@@ -16,7 +17,8 @@ import { AutomodTracker, CASE_LABEL, MAX_TIMEOUT_MS, createCase, deleteCase, due
 import { checkCanModerate } from '@aio/permissions';
 import { COLORS, formatDuration } from '@aio/discord-ui';
 import type { BotContext } from '../../runtime/context.js';
-import { ephemeral, highestRolePosition, textChannel, ts } from '../../runtime/discord.js';
+import { botCanSend, ephemeral, highestRolePosition, textChannel, ts } from '../../runtime/discord.js';
+import { isPrefixInvocation } from '../../runtime/prefix.js';
 import type { BotModule, SlashCommand } from '../../commands/types.js';
 
 const tracker = new AutomodTracker();
@@ -344,6 +346,25 @@ const slowmode = cmd(
   },
 );
 
+const echo = cmd(
+  new SlashCommandBuilder().setName('echo').setDescription('Make the bot post a message in this channel').addStringOption((o) => o.setName('message').setDescription('What the bot should say').setRequired(true).setMaxLength(2000)),
+  async (i, ctx) => {
+    const fromPrefix = isPrefixInvocation(i);
+    const channel = i.channel;
+    if (!channel || !botCanSend(i.guild, channel)) return fromPrefix ? undefined : i.reply(ephemeral("I can't send messages in this channel."));
+
+    const message = i.options.getString('message', true);
+    // Neither form leaves a trace besides the bot's copy: the `+echo` message is deleted, and the
+    // slash acknowledgement is removed once the message is out.
+    if (fromPrefix) await channel.messages.delete(i.id).catch(() => undefined);
+    else await i.deferReply({ flags: MessageFlags.Ephemeral });
+    const sent = await channel.send({ content: message, allowedMentions: { parse: [] } });
+    await ctx.audit({ actorId: i.user.id, module: 'moderation', action: 'echo.send', meta: { channelId: channel.id, messageId: sent.id, preview: message.slice(0, 200) } });
+
+    if (!fromPrefix) await i.deleteReply().catch(() => undefined);
+  },
+);
+
 async function setLocked(ch: TextChannel, locked: boolean, reason: string | null): Promise<void> {
   await ch.permissionOverwrites.edit(ch.guild.id, { SendMessages: locked ? false : null, SendMessagesInThreads: locked ? false : null, AddReactions: locked ? false : null }, { reason: reason ?? undefined });
 }
@@ -435,7 +456,7 @@ export async function handleAutomod(ctx: BotContext, message: Message<true>): Pr
 }
 
 export const moderationModule: BotModule = {
-  commands: [warn, warnings, modhistory, caseCmd, note, timeout, untimeout, removalCommand('kick', 'Kick a member (reason required)', PermissionFlagsBits.KickMembers), voicekick, ban, tempban, removalCommand('softban', 'Ban and immediately unban to clear messages (reason required)', PermissionFlagsBits.BanMembers), unban, purge, slowmode, lock, unlock, lockdown],
+  commands: [warn, warnings, modhistory, caseCmd, note, timeout, untimeout, removalCommand('kick', 'Kick a member (reason required)', PermissionFlagsBits.KickMembers), voicekick, ban, tempban, removalCommand('softban', 'Ban and immediately unban to clear messages (reason required)', PermissionFlagsBits.BanMembers), unban, purge, slowmode, lock, unlock, lockdown, echo],
   components: [
     {
       prefix: 'mod',

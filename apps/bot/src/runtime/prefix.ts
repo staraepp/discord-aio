@@ -15,6 +15,13 @@ const EPHEMERAL_TTL_MS = 20_000;
 
 export class SlashOnlyError extends Error {}
 
+const prefixInvocations = new WeakSet<object>();
+
+/** True when a command handler is running from a `+command` message instead of a slash command. */
+export function isPrefixInvocation(i: object): boolean {
+  return prefixInvocations.has(i);
+}
+
 function resolverFor(message: Message<true>): EntityResolver {
   const guild = message.guild;
   const byName = <T extends { id: string }>(items: Iterable<T>, names: (x: T) => (string | null | undefined)[], token: string) => {
@@ -205,6 +212,7 @@ function interactionFor(message: Message<true>, cmd: SlashCommand, r: ResolvedOp
       throw new SlashOnlyError();
     },
   };
+  prefixInvocations.add(shim);
   return shim;
 }
 
