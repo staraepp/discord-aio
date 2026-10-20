@@ -18,12 +18,16 @@ function fakeChannel() {
     permissionsFor: () => ({ has: () => true }),
     send: vi.fn(async () => ({ id: '8'.repeat(18), delete: vi.fn(async () => undefined) })),
     sendTyping: vi.fn(async () => undefined),
-    messages: { delete: vi.fn(async () => undefined) },
   };
 }
 
 function fakeGuild() {
-  return { id: '9'.repeat(18), members: { me: {}, cache: new Map(), fetch: vi.fn(async () => null) }, channels: { cache: new Map() }, roles: { cache: new Map() } };
+  return {
+    id: '9'.repeat(18),
+    members: { me: {}, cache: new Map(), fetch: vi.fn(async () => null) },
+    channels: { cache: new Map() },
+    roles: { cache: new Map() },
+  };
 }
 
 function fakeMessage(channel: ReturnType<typeof fakeChannel>) {
@@ -49,11 +53,20 @@ describe('echo', () => {
     const channel = fakeChannel();
     const message = fakeMessage(channel);
     const ctx = fakeCtx(true);
-    const r = await runPrefixCommand(ctx as never, message as never, { cmd: echo, name: 'echo', args: 'hello @everyone there' }, '+', false);
+    const r = await runPrefixCommand(
+      ctx as never,
+      message as never,
+      { cmd: echo, name: 'echo', args: 'hello @everyone there' },
+      '+',
+      false,
+    );
 
     expect(r).toEqual({ ok: true });
-    expect(channel.messages.delete).toHaveBeenCalledWith(TRIGGER);
-    expect(channel.send).toHaveBeenCalledWith({ content: 'hello @everyone there', allowedMentions: { parse: [] } });
+    expect(message.delete).toHaveBeenCalled();
+    expect(channel.send).toHaveBeenCalledWith({
+      content: 'hello @everyone there',
+      allowedMentions: { parse: [] },
+    });
     expect(message.reply).not.toHaveBeenCalled();
     expect(message.author.send).not.toHaveBeenCalled();
     expect(ctx.audit).toHaveBeenCalledWith(expect.objectContaining({ actorId: STAFF, action: 'echo.send' }));
@@ -62,10 +75,15 @@ describe('echo', () => {
   it('+echo from a non-staff member posts nothing', async () => {
     const channel = fakeChannel();
     const message = fakeMessage(channel);
-    await runPrefixCommand(fakeCtx(false) as never, message as never, { cmd: echo, name: 'echo', args: 'hi' }, '+', false);
+    await runPrefixCommand(
+      fakeCtx(false) as never,
+      message as never,
+      { cmd: echo, name: 'echo', args: 'hi' },
+      '+',
+      false,
+    );
 
     expect(channel.send).not.toHaveBeenCalledWith(expect.objectContaining({ content: 'hi' }));
-    expect(channel.messages.delete).not.toHaveBeenCalled();
   });
 
   it('/echo posts the message and removes its own acknowledgement', async () => {
@@ -87,6 +105,5 @@ describe('echo', () => {
     expect(channel.send).toHaveBeenCalledWith({ content: 'hello', allowedMentions: { parse: [] } });
     expect(interaction.deleteReply).toHaveBeenCalled();
     expect(interaction.reply).not.toHaveBeenCalled();
-    expect(channel.messages.delete).not.toHaveBeenCalled();
   });
 });

@@ -14,6 +14,7 @@ import {
   Hand,
   LayoutDashboard,
   LifeBuoy,
+  Lightbulb,
   MessageSquareReply,
   Send,
   Music,
@@ -75,6 +76,7 @@ const MODULE_ICONS: Record<string, typeof Music> = {
   polls: BarChart3,
   reminders: AlarmClock,
   starboard: Star,
+  suggestions: Lightbulb,
 };
 
 export function buildNav({ modules, adminAccess, isOwner }: { modules: NavModule[]; adminAccess: boolean; isOwner: boolean }): NavSection[] {

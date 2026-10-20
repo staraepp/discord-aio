@@ -62,6 +62,7 @@ Decisions made where `BLUEPRINT.md` left room, plus the places where the impleme
 - **Leveling:** the dashboard mirrors the presets from `packages/core/src/leveling` for instant feedback; the server re-validates on save. Keep them in sync if presets change. XP edits are done with `/xp` and `/level` in Discord so that reward roles are re-synced immediately.
 - **Tickets:** transcripts are stored in the database (JSON) and viewable in the dashboard. Ticket channel name variables are `{user.name}`, `{staff.name}`, `{number}` and `{type}`.
 - **Forms:** optional Turnstile on submission when configured, plus a hidden honeypot field and per-IP rate limits.
+- **Suggestions:** `/suggest` and `+suggest` post through a bot-owned webhook in the suggestions channel so the post shows the member's name and avatar, with `User ID` in the footer. Without Manage Webhooks, or when Discord rejects the display name for a webhook, the bot posts the embed itself with the member as the embed author. The `+suggest` message is always deleted (`deletePrefixTrigger`), and the per-member cooldown lives in memory, so a restart clears it.
 
 ## Database backups
 

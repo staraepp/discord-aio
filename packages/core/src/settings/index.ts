@@ -10,6 +10,7 @@ import type {
   pollSettingsSchema,
   reminderSettingsSchema,
   starboardSettingsSchema,
+  suggestionSettingsSchema,
   moderationSettingsSchema,
   musicSettingsSchema,
   tempVcSettingsSchema,
@@ -38,6 +39,7 @@ export interface ModuleSettingsMap {
   polls: z.infer<typeof pollSettingsSchema>;
   reminders: z.infer<typeof reminderSettingsSchema>;
   starboard: z.infer<typeof starboardSettingsSchema>;
+  suggestions: z.infer<typeof suggestionSettingsSchema>;
 }
 
 export interface ModuleState<K extends ModuleId> {

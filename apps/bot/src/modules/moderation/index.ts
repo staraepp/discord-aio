@@ -346,24 +346,26 @@ const slowmode = cmd(
   },
 );
 
-const echo = cmd(
-  new SlashCommandBuilder().setName('echo').setDescription('Make the bot post a message in this channel').addStringOption((o) => o.setName('message').setDescription('What the bot should say').setRequired(true).setMaxLength(2000)),
-  async (i, ctx) => {
-    const fromPrefix = isPrefixInvocation(i);
-    const channel = i.channel;
-    if (!channel || !botCanSend(i.guild, channel)) return fromPrefix ? undefined : i.reply(ephemeral("I can't send messages in this channel."));
+const echo: SlashCommand = {
+  ...cmd(
+    new SlashCommandBuilder().setName('echo').setDescription('Make the bot post a message in this channel').addStringOption((o) => o.setName('message').setDescription('What the bot should say').setRequired(true).setMaxLength(2000)),
+    async (i, ctx) => {
+      const fromPrefix = isPrefixInvocation(i);
+      const channel = i.channel;
+      if (!channel || !botCanSend(i.guild, channel)) return fromPrefix ? undefined : i.reply(ephemeral("I can't send messages in this channel."));
 
-    const message = i.options.getString('message', true);
-    // Neither form leaves a trace besides the bot's copy: the `+echo` message is deleted, and the
-    // slash acknowledgement is removed once the message is out.
-    if (fromPrefix) await channel.messages.delete(i.id).catch(() => undefined);
-    else await i.deferReply({ flags: MessageFlags.Ephemeral });
-    const sent = await channel.send({ content: message, allowedMentions: { parse: [] } });
-    await ctx.audit({ actorId: i.user.id, module: 'moderation', action: 'echo.send', meta: { channelId: channel.id, messageId: sent.id, preview: message.slice(0, 200) } });
+      const message = i.options.getString('message', true);
+      // Neither form leaves a trace besides the bot's copy: the prefix runner deletes the `+echo`
+      // message, and the slash acknowledgement is removed once the message is out.
+      if (!fromPrefix) await i.deferReply({ flags: MessageFlags.Ephemeral });
+      const sent = await channel.send({ content: message, allowedMentions: { parse: [] } });
+      await ctx.audit({ actorId: i.user.id, module: 'moderation', action: 'echo.send', meta: { channelId: channel.id, messageId: sent.id, preview: message.slice(0, 200) } });
 
-    if (!fromPrefix) await i.deleteReply().catch(() => undefined);
-  },
-);
+      if (!fromPrefix) await i.deleteReply().catch(() => undefined);
+    },
+  ),
+  deletePrefixTrigger: true,
+};
 
 async function setLocked(ch: TextChannel, locked: boolean, reason: string | null): Promise<void> {
   await ch.permissionOverwrites.edit(ch.guild.id, { SendMessages: locked ? false : null, SendMessagesInThreads: locked ? false : null, AddReactions: locked ? false : null }, { reason: reason ?? undefined });

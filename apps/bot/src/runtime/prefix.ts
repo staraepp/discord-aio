@@ -272,7 +272,7 @@ export async function runPrefixCommand(ctx: BotContext, message: Message<true>, 
   }
 
   let deleted = false;
-  if (deleteTrigger) deleted = await message.delete().then(() => true, () => false);
+  if (deleteTrigger || match.cmd.deletePrefixTrigger) deleted = await message.delete().then(() => true, () => false);
   const shim = interactionFor(message, match.cmd, { sub: parsed.sub, group: parsed.group, values: parsed.values, users, members }, () => deleted);
   await match.cmd.execute(shim as unknown as ChatInputCommandInteraction<'cached'>, ctx);
   return { ok: true };

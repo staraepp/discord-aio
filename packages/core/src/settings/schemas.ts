@@ -242,8 +242,18 @@ export const starboardSettingsSchema = z.object({
   includeNsfw: z.boolean().default(false),
 });
 
+export const suggestionSettingsSchema = z.object({
+  channelId: optSnowflake,
+  /** Added under every suggestion, in this order. */
+  reactions: z.array(reactionEmoji).max(5).default(['✅', '➖', '❌']),
+  /** Post through a channel webhook with the member's name and avatar instead of as the bot. */
+  postAsMember: z.boolean().default(true),
+  cooldownSeconds: z.number().int().min(0).max(3600).default(60),
+});
+
 export type MusicSettings = z.infer<typeof musicSettingsSchema>;
 export type StarboardSettings = z.infer<typeof starboardSettingsSchema>;
+export type SuggestionSettings = z.infer<typeof suggestionSettingsSchema>;
 export type TempVcSettings = z.infer<typeof tempVcSettingsSchema>;
 export type LevelingSettings = z.infer<typeof levelingSettingsSchema>;
 export type ModerationSettings = z.infer<typeof moderationSettingsSchema>;

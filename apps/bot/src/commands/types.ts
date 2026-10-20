@@ -17,6 +17,8 @@ export interface SlashCommand {
   autocomplete?(i: AutocompleteInteraction<'cached'>, ctx: BotContext): Promise<unknown>;
   /** Autocomplete only suggests; whatever the user typed is already valid (e.g. a search). */
   suggestionsOnly?: boolean;
+  /** Prefix only: always remove the `+command` message, whatever the command rule says. */
+  deletePrefixTrigger?: boolean;
 }
 
 export interface ComponentHandler {

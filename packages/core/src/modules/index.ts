@@ -7,6 +7,7 @@ import {
   pollSettingsSchema,
   reminderSettingsSchema,
   starboardSettingsSchema,
+  suggestionSettingsSchema,
   levelingSettingsSchema,
   moderationSettingsSchema,
   musicSettingsSchema,
@@ -33,7 +34,8 @@ export type ModuleId =
   | 'giveaways'
   | 'polls'
   | 'reminders'
-  | 'starboard';
+  | 'starboard'
+  | 'suggestions';
 
 export type GatewayIntentName = 'Guilds' | 'GuildMembers' | 'GuildMessages' | 'GuildVoiceStates' | 'MessageContent' | 'GuildMessageReactions';
 
@@ -254,6 +256,18 @@ export const MODULES: ModuleDefinition[] = [
     intents: ['Guilds', 'GuildMessages', 'GuildMessageReactions'],
     botPermissions: ['ViewChannel', 'SendMessages', 'EmbedLinks', 'ReadMessageHistory'],
     settingsSchema: starboardSettingsSchema,
+    integrations: [],
+    defaultEnabled: false,
+  },
+  {
+    id: 'suggestions',
+    name: 'Suggestions',
+    description: 'Members post ideas with /suggest, and the server votes on them with reactions.',
+    route: '/dashboard/suggestions',
+    commands: ['suggest'],
+    intents: ['Guilds', 'GuildMessages'],
+    botPermissions: ['ViewChannel', 'SendMessages', 'EmbedLinks', 'AddReactions', 'ReadMessageHistory', 'ManageWebhooks'],
+    settingsSchema: suggestionSettingsSchema,
     integrations: [],
     defaultEnabled: false,
   },

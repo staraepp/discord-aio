@@ -19,6 +19,7 @@ import { aiModule } from '../modules/ai/index.js';
 import { giveawaysModule } from '../modules/giveaways/index.js';
 import { pollsModule } from '../modules/polls/index.js';
 import { remindersModule } from '../modules/reminders/index.js';
+import { suggestionsModule } from '../modules/suggestions/index.js';
 import { helpCommand, helpComponents } from './help.js';
 
 const coreModule: BotModule = {
@@ -36,7 +37,7 @@ const coreModule: BotModule = {
   ],
 };
 
-export const ALL_MODULES: BotModule[] = [coreModule, musicCommands, musicComponents, tempVcModule, embedsModule, levelingModule, moderationModule, ticketsModule, verificationModule, rolePanelsModule, aiModule, giveawaysModule, pollsModule, remindersModule];
+export const ALL_MODULES: BotModule[] = [coreModule, musicCommands, musicComponents, tempVcModule, embedsModule, levelingModule, moderationModule, ticketsModule, verificationModule, rolePanelsModule, aiModule, giveawaysModule, pollsModule, remindersModule, suggestionsModule];
 
 const commands = new Map<string, SlashCommand>();
 const components = new Map<string, ComponentHandler>();

@@ -76,4 +76,9 @@ export class CooldownMap {
   set(key: string, ms: number): void {
     if (ms > 0) this.until.set(key, this.now() + ms);
   }
+
+  /** Milliseconds until the key is free again; 0 when it is not cooling. */
+  remainingMs(key: string): number {
+    return this.isCooling(key) ? this.until.get(key)! - this.now() : 0;
+  }
 }
