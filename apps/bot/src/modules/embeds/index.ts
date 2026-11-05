@@ -3,7 +3,7 @@ import { runActions } from '@aio/core';
 import { deleteEmbedDraft, getEmbedDraft, listEmbedDrafts, loadSavedEmbed, saveEmbedDraft, savedEmbedInputSchema } from '@aio/core/embeds';
 import { colorToHex, messageTemplateSchema, parseColor, renderMessageTemplate, type MessageTemplate } from '@aio/discord-ui';
 import type { BotContext } from '../../runtime/context.js';
-import { ephemeral, textChannel, toMessageOptions } from '../../runtime/discord.js';
+import { botCanSend, ephemeral, textChannel, toMessageOptions } from '../../runtime/discord.js';
 import { createActionExecutor, renderSavedEmbed, variableContext } from '../../runtime/actions.js';
 import type { BotModule } from '../../commands/types.js';
 
@@ -50,12 +50,12 @@ function ago(d: Date): string {
   return `${Math.round(min / 1440)}d ago`;
 }
 
-function editorView(ctx: BotContext, d: Draft, member: Parameters<typeof variableContext>[0], note?: string): InteractionUpdateOptions & { flags?: number } {
+function editorView(ctx: BotContext, d: Draft, member: Parameters<typeof variableContext>[0], note?: string, ownerId?: string): InteractionUpdateOptions & { flags?: number } {
   const e = d.template.embeds[0]!;
   const preview = renderMessageTemplate(d.template, variableContext(member), { preview: true });
   const b = (id: string, label: string, style = ButtonStyle.Secondary) => new ButtonBuilder().setCustomId(`em:${id}:${d.id}`).setLabel(label).setStyle(style);
   return {
-    content: `**Editing embed “${d.name}”**. Preview is below, variables use sample values.${note ? `\n${note}` : ''}\n-# Fields: ${e.fields.length}/25 · Color ${colorToHex(e.color)} · Autosaved. If this disappears, use \`/embed resume\` or finish it on the dashboard.`,
+    content: `**Editing embed “${d.name}”**${ownerId ? ` (only <@${ownerId}> can use these buttons)` : ''}. Preview is below, variables use sample values.${note ? `\n${note}` : ''}\n-# Fields: ${e.fields.length}/25 · Color ${colorToHex(e.color)} · Autosaved. If this disappears, use \`/embed resume\` or finish it on the dashboard.`,
     embeds: preview.embeds as never,
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(b('text', 'Title & text'), b('color', 'Color'), b('author', 'Author'), b('footer', 'Footer'), b('images', 'Images')),
@@ -120,19 +120,19 @@ export const embedsModule: BotModule = {
           const d = await loadDraft(ctx, i.user.id, i.options.getString('draft') ?? undefined);
           if (d === 'invalid') return i.reply(ephemeral('That draft has parts Discord can\'t show yet. Finish it on the dashboard under Embeds.'));
           if (!d) return i.reply(ephemeral('That draft is gone. It was saved, discarded, or older than 30 days.'));
-          return i.reply({ ...editorView(ctx, d, i.member, 'Picked up where you left off 🥹'), flags: 64 } as never);
+          return i.reply({ ...editorView(ctx, d, i.member, 'Picked up where you left off 🥹', i.user.id) } as never);
         }
         if (sub === 'create') {
           if (await ctx.db.savedEmbed.findFirst({ where: { guildId: ctx.guildId, name } })) return i.reply(ephemeral('An embed with that name already exists.'));
           const d = await persistDraft(ctx, i.user.id, { name, template: { content: undefined, embeds: [{ title: name, description: 'Edit me', color: 0x6d5dfc, timestamp: false, fields: [] }], components: [] } });
-          return i.reply({ ...editorView(ctx, d, i.member), flags: 64 } as never);
+          return i.reply({ ...editorView(ctx, d, i.member, undefined, i.user.id) } as never);
         }
         const saved = await loadSavedEmbed(ctx.db, ctx.guildId, name);
         if (!saved) return i.reply(ephemeral('Saved embed not found.'));
         if (sub === 'edit') {
           if (!saved.template.embeds.length) return i.reply(ephemeral('This template has no embed; edit it in the dashboard.'));
           const d = await persistDraft(ctx, i.user.id, { embedId: saved.id, name: saved.name, template: saved.template });
-          return i.reply({ ...editorView(ctx, d, i.member), flags: 64 } as never);
+          return i.reply({ ...editorView(ctx, d, i.member, undefined, i.user.id) } as never);
         }
         if (sub === 'show') {
           const r = await renderSavedEmbed(ctx, saved.id, variableContext(i.member, i.channel));
@@ -150,7 +150,14 @@ export const embedsModule: BotModule = {
           const ch = textChannel(i.guild, target);
           if (!ch) return i.reply(ephemeral('Choose a text channel.'));
           const r = await renderSavedEmbed(ctx, saved.id, variableContext(i.member, ch));
-          await ch.send(toMessageOptions(r!));
+          if (!botCanSend(i.guild, ch)) return i.reply(ephemeral(`I can't send messages in <#${ch.id}>.`));
+          if (!ch.permissionsFor(i.member)?.has('SendMessages')) return i.reply(ephemeral(`You can't send messages in <#${ch.id}>, so I won't send there for you.`));
+          try {
+            await ch.send(toMessageOptions(r!));
+          } catch (err) {
+            ctx.reportError(err, 'embeds.send', { channelId: ch.id });
+            return i.reply(ephemeral(`Discord refused the message in <#${ch.id}>. Check my permissions there (Send Messages, Embed Links).`));
+          }
           await ctx.audit({ actorId: i.user.id, module: 'embeds', action: 'embed.send', targetId: saved.id, meta: { channelId: ch.id } });
           return i.reply(ephemeral(`Sent **${saved.name}** to <#${ch.id}>.`));
         }
@@ -168,7 +175,7 @@ export const embedsModule: BotModule = {
         const modalAction = action === 'm' ? a2 : undefined;
         const loaded = await loadDraft(ctx, i.user.id, action === 'm' ? a3 : a2);
         if (loaded === 'invalid') return i.reply(ephemeral('This draft has parts Discord can\'t show. Finish it on the dashboard under Embeds.'));
-        if (!loaded) return i.reply(ephemeral('This draft is gone (saved, discarded, or from before an update). Use `/embed resume` to see your drafts.'));
+        if (!loaded) return i.reply(ephemeral('This editor belongs to someone else, or its draft is gone (saved, discarded, or from before an update). Use `/embed create` for a new one or `/embed resume` for your own drafts.'));
         const d = loaded;
         const e = d.template.embeds[0]!;
         if (i.isButton()) {
@@ -190,13 +197,13 @@ export const embedsModule: BotModule = {
             case 'clearfields':
               e.fields = [];
               await persistDraft(ctx, i.user.id, d);
-              return i.update(editorView(ctx, d, i.member, 'Fields cleared.'));
+              return i.update(editorView(ctx, d, i.member, 'Fields cleared.', i.user.id));
             case 'cancel':
               await deleteEmbedDraft(ctx.db, ctx.guildId, i.user.id, d.id);
               return i.update({ content: 'Discarded changes.', embeds: [], components: [] });
             case 'save': {
               const parsed = savedEmbedInputSchema.safeParse({ name: d.name, template: d.template });
-              if (!parsed.success) return i.update(editorView(ctx, d, i.member, `That didn't work 😣 ${parsed.error.issues[0]?.message ?? 'Invalid embed'}`));
+              if (!parsed.success) return i.update(editorView(ctx, d, i.member, `That didn't work 😣 ${parsed.error.issues[0]?.message ?? 'Invalid embed'}`, i.user.id));
               const row = d.embedId
                 ? await ctx.db.savedEmbed.update({ where: { id: d.embedId }, data: { template: parsed.data.template as object } })
                 : await ctx.db.savedEmbed.create({ data: { guildId: ctx.guildId, name: d.name, template: parsed.data.template as object, createdBy: i.user.id } });
@@ -251,8 +258,8 @@ export const embedsModule: BotModule = {
           if (!check.success) return i.reply(ephemeral(`That didn't work 😣 ${check.error.issues[0]?.path.join('.')}: ${check.error.issues[0]?.message}`));
           d.template = check.data;
           await persistDraft(ctx, i.user.id, d);
-          if (i.isFromMessage()) return i.update(editorView(ctx, d, i.member));
-          return i.reply({ ...editorView(ctx, d, i.member), flags: 64 } as never);
+          if (i.isFromMessage()) return i.update(editorView(ctx, d, i.member, undefined, i.user.id));
+          return i.reply({ ...editorView(ctx, d, i.member, undefined, i.user.id), flags: 64 } as never);
         }
         return undefined;
       },

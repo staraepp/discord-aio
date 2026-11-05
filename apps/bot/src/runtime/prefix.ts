@@ -9,9 +9,15 @@ import type { SlashCommand } from '../commands/types.js';
  * works unchanged and keeps its own permission checks.
  */
 
-/** Modules whose private replies may hold staff-only information: those go to DMs. */
+/**
+ * Prefix commands can't send real ephemeral replies. Private replies are posted in the channel and removed
+ * after a while. They are never sent by DM: unsolicited DMs got the bot quarantined (see DEV_NOTES.md), and
+ * a DM'd confirm button cannot work outside the server anyway. Moderation and verification replies stay
+ * longer because they carry the case number and the updated warning count.
+ */
 const SENSITIVE_MODULES = new Set(['moderation', 'verification']);
 const EPHEMERAL_TTL_MS = 20_000;
+const SENSITIVE_TTL_MS = 120_000;
 
 export class SlashOnlyError extends Error {}
 
@@ -130,7 +136,7 @@ function optionsShim(message: Message<true>, r: ResolvedOptions) {
   };
 }
 
-/** An interaction look-alike whose replies become normal messages (private ones DM'd or auto-deleted). */
+/** An interaction look-alike whose replies become normal messages (private ones are auto-deleted after a while). */
 function interactionFor(message: Message<true>, cmd: SlashCommand, r: ResolvedOptions, triggerDeleted: () => boolean) {
   let sent: Message | null = null;
   let deferredEphemeral = false;
@@ -139,16 +145,8 @@ function interactionFor(message: Message<true>, cmd: SlashCommand, r: ResolvedOp
   const post = async (raw: unknown, forceEphemeral = false): Promise<Message> => {
     const { ephemeral, ...opts } = normalise(raw);
     const isPrivate = ephemeral || forceEphemeral;
-    if (isPrivate && sensitive) {
-      const dm = await message.author.send(opts).catch(() => null);
-      if (dm) {
-        const note = await message.channel.send({ content: `<@${message.author.id}> check your DMs 😛`, allowedMentions: { users: [message.author.id] } }).catch(() => null);
-        if (note) setTimeout(() => void note.delete().catch(() => undefined), 8_000).unref();
-        return dm;
-      }
-    }
     const msg = triggerDeleted() ? await message.channel.send(opts) : await message.reply(opts);
-    if (isPrivate) setTimeout(() => void msg.delete().catch(() => undefined), EPHEMERAL_TTL_MS).unref();
+    if (isPrivate) setTimeout(() => void msg.delete().catch(() => undefined), sensitive ? SENSITIVE_TTL_MS : EPHEMERAL_TTL_MS).unref();
     return msg;
   };
 

@@ -73,7 +73,7 @@ export const envSchema = z.object({
    * that proxy controls. `cloudflare` (Cloudflare Tunnel) trusts CF-Connecting-IP; only use it when the
    * dashboard is NOT reachable any other way, or the header could be forged.
    */
-  TRUST_PROXY: z.preprocess(blankToUndefined, z.enum(['none', 'cloudflare']).default('none')),
+  TRUST_PROXY: z.preprocess(blankToUndefined, z.enum(['none', 'proxy', 'cloudflare']).default('none')),
   /** Development-only dashboard preview login. Ignored when NODE_ENV=production. */
   DASHBOARD_DEV_LOGIN: z.preprocess(blankToUndefined, bool.default(false)),
 });

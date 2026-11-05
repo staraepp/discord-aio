@@ -190,6 +190,19 @@ async function runTicketAction(ctx: BotContext, member: GuildMember, ticket: Tic
   }
 }
 
+function retryRename(ctx: BotContext, channel: TextChannel, name: string, delays: number[]): void {
+  const [delay, ...rest] = delays;
+  if (delay === undefined) return;
+  setTimeout(() => {
+    void channel
+      .setName(name, 'First staff response (retry)')
+      .catch((err: unknown) => {
+        ctx.reportError(err, 'tickets.rename.retry');
+        retryRename(ctx, channel, name, rest);
+      });
+  }, delay).unref();
+}
+
 /** First staff message renames the channel exactly once. */
 export async function handleTicketMessage(ctx: BotContext, message: Message<true>): Promise<void> {
   if (message.author.bot || !message.member) return;
@@ -209,7 +222,13 @@ export async function handleTicketMessage(ctx: BotContext, message: Message<true
   });
   if (!decision.rename) return;
   if (!(await claimFirstResponder(ctx.db, ticket.id, message.author.id))) return;
-  await (message.channel as TextChannel).setName(decision.name, 'First staff response').catch((err) => ctx.reportError(err, 'tickets.rename'));
+  // The claim above is final (the handler is recorded once). Only the Discord rename can fail, typically
+  // on Discord's channel-rename rate limit (2 per 10 minutes), so retry it with a growing delay.
+  const channel = message.channel as TextChannel;
+  const renamed = await channel.setName(decision.name, 'First staff response').then(() => true, (err: unknown) => (ctx.reportError(err, 'tickets.rename'), false));
+  if (!renamed) {
+    retryRename(ctx, channel, decision.name, [30_000, 120_000, 600_000]);
+  }
   await ctx.audit({ actorId: message.author.id, module: 'tickets', action: 'ticket.first_response', targetId: ticket.openerId, meta: { number: ticket.number, name: decision.name } });
 }
 

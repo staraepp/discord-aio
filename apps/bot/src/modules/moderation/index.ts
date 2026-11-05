@@ -8,8 +8,11 @@ import {
   SlashCommandBuilder,
   type ChatInputCommandInteraction,
   type GuildMember,
+  type ForumChannel,
   type Message,
+  type NewsChannel,
   type TextChannel,
+  type SlashCommandChannelOption,
   type SlashCommandStringOption,
 } from 'discord.js';
 import type { ModerationCase } from '@aio/db';
@@ -43,7 +46,7 @@ function hierarchy(i: ChatInputCommandInteraction<'cached'>, target: GuildMember
   });
 }
 
-async function modLog(ctx: BotContext, c: ModerationCase): Promise<void> {
+async function modLog(ctx: BotContext, c: ModerationCase, note?: string): Promise<void> {
   const { settings } = await ctx.module('moderation');
   const guild = ctx.guild();
   const ch = guild ? textChannel(guild, settings.modLogChannelId) : null;
@@ -59,7 +62,8 @@ async function modLog(ctx: BotContext, c: ModerationCase): Promise<void> {
             `**Moderator:** <@${c.moderatorId}>`,
             c.reason ? `**Reason:** ${c.reason}` : null,
             c.durationMs ? `**Duration:** ${formatDuration(c.durationMs)}` : null,
-            c.evidence ? `**Evidence:** ${c.evidence}` : null,
+            c.evidence && c.type !== 'lockdown' && c.type !== 'lock' ? `**Evidence:** ${c.evidence.slice(0, 1000)}` : null,
+            note ?? null,
           ]
             .filter(Boolean)
             .join('\n'),
@@ -120,7 +124,7 @@ const warn = cmd(
     const check = validateReason('warn', reason);
     if (!check.ok) return i.reply(ephemeral(check.message));
     const { case: c, warningCount: count } = await warnMember(ctx.db, { guildId: ctx.guildId, targetId: target.id, moderatorId: i.user.id, reason, evidence: i.options.getString('evidence') });
-    await modLog(ctx, c);
+    await modLog(ctx, c, `**Warnings now:** ${count}`);
     const dmed = await dmTarget(ctx, target, 'warning', reason, i.guild.name);
     // Informational only: no automatic escalation happens at any count.
     return i.reply(ephemeral(`Warned <@${target.id}> (case #${c.caseNumber}). They now have **${count}** warning${count === 1 ? '' : 's'}.${dmed ? '' : ' (Could not DM them.)'}`));
@@ -232,11 +236,18 @@ function removalCommand(type: 'kick' | 'softban', description: string, perm: big
       const reason = i.options.getString('reason', true);
       const check = validateReason(type, reason);
       if (!check.ok) return i.reply(ephemeral(check.message));
+      // Check first so a member is never told about an action Discord will refuse.
+      if (type === 'kick' ? !target.kickable : !target.bannable) return i.reply(ephemeral(`I can't ${type} that member (my role is not high enough or I lack the permission). Nothing was done.`));
       const dmed = await dmTarget(ctx, target, type === 'kick' ? 'kick' : 'kick (softban)', reason, i.guild.name);
-      if (type === 'kick') await target.kick(reason);
-      else {
-        await i.guild.bans.create(target.id, { reason: `Softban: ${reason}`, deleteMessageSeconds: 7 * 86400 });
-        await i.guild.bans.remove(target.id, 'Softban: immediate unban');
+      try {
+        if (type === 'kick') await target.kick(reason);
+        else {
+          await i.guild.bans.create(target.id, { reason: `Softban: ${reason}`, deleteMessageSeconds: 7 * 86400 });
+          await i.guild.bans.remove(target.id, 'Softban: immediate unban');
+        }
+      } catch (err) {
+        ctx.reportError(err, `moderation.${type}`);
+        return i.reply(ephemeral(`Discord refused the ${type}, so no case was created. They may have been messaged already.`));
       }
       const c = await record(ctx, { guildId: ctx.guildId, type, targetId: target.id, moderatorId: i.user.id, reason, evidence: i.options.getString('evidence') });
       return i.reply(ephemeral(`${type === 'kick' ? 'Kicked' : 'Softbanned'} <@${target.id}> (case #${c.caseNumber}).${dmed ? '' : ' (Could not DM them.)'}`));
@@ -269,8 +280,14 @@ async function banFlow(i: ChatInputCommandInteraction<'cached'>, ctx: BotContext
   const reason = i.options.getString('reason', true);
   const check = validateReason(type, reason);
   if (!check.ok) return i.reply(ephemeral(check.message));
+  if (member && !member.bannable) return i.reply(ephemeral(`I can't ban that member (my role is not high enough or I lack the permission). Nothing was done.`));
   const dmed = member ? await dmTarget(ctx, member, type === 'ban' ? 'ban' : `temporary ban (${formatDuration(durationMs!)})`, reason, i.guild.name) : false;
-  await i.guild.bans.create(user.id, { reason, deleteMessageSeconds: (i.options.getInteger('delete_days') ?? 0) * 86400 });
+  try {
+    await i.guild.bans.create(user.id, { reason, deleteMessageSeconds: (i.options.getInteger('delete_days') ?? 0) * 86400 });
+  } catch (err) {
+    ctx.reportError(err, `moderation.${type}`);
+    return i.reply(ephemeral('Discord refused the ban (check my Ban Members permission). No case was created.'));
+  }
   const c = await record(ctx, { guildId: ctx.guildId, type, targetId: user.id, moderatorId: i.user.id, reason, durationMs: durationMs ?? null, evidence: i.options.getString('evidence') });
   return i.reply(ephemeral(`${type === 'ban' ? 'Banned' : `Banned for ${formatDuration(durationMs!)}`} <@${user.id}> (case #${c.caseNumber}).${member && !dmed ? ' (Could not DM them.)' : ''}`));
 }
@@ -328,8 +345,14 @@ const purge = cmd(
     const user = i.options.getUser('user');
     const fetched = await ch.messages.fetch({ limit: 100 });
     const targets = [...fetched.values()].filter((m) => !user || m.author.id === user.id).slice(0, amount);
+    // Keep what was removed with the case: purged messages are otherwise gone for good.
+    const snapshot = targets
+      .slice()
+      .reverse()
+      .map((m) => `[${m.createdAt.toISOString()}] ${m.author.id}: ${(m.content || (m.attachments.size ? `(${m.attachments.size} attachment(s))` : '(no text)')).replace(/\s+/g, ' ').slice(0, 200)}`)
+      .join('\n');
     const deleted = await ch.bulkDelete(targets, true);
-    const c = await record(ctx, { guildId: ctx.guildId, type: 'purge', targetId: user?.id ?? null, moderatorId: i.user.id, reason: i.options.getString('reason'), channelId: ch.id });
+    const c = await record(ctx, { guildId: ctx.guildId, type: 'purge', targetId: user?.id ?? null, moderatorId: i.user.id, reason: i.options.getString('reason'), channelId: ch.id, evidence: snapshot.slice(0, 3800) || null });
     return i.editReply(`Deleted ${deleted.size} message(s) (case #${c.caseNumber}). Messages older than 14 days can't be bulk-deleted.`);
   },
 );
@@ -367,31 +390,86 @@ const echo: SlashCommand = {
   deletePrefixTrigger: true,
 };
 
-async function setLocked(ch: TextChannel, locked: boolean, reason: string | null): Promise<void> {
-  await ch.permissionOverwrites.edit(ch.guild.id, { SendMessages: locked ? false : null, SendMessagesInThreads: locked ? false : null, AddReactions: locked ? false : null }, { reason: reason ?? undefined });
+type Lockable = TextChannel | NewsChannel | ForumChannel;
+const LOCKABLE_TYPES = [ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum] as const;
+const isLockable = (c: unknown): c is Lockable => Boolean(c) && (LOCKABLE_TYPES as readonly number[]).includes((c as Lockable).type);
+
+/** An @everyone overwrite value: true = explicit allow, false = explicit deny, null = inherit. */
+type Tri = boolean | null;
+/** [SendMessages, SendMessagesInThreads, AddReactions] as they were before the lock. */
+type Saved = [Tri, Tri, Tri];
+
+function everyoneState(ch: Lockable): Saved {
+  const ow = ch.permissionOverwrites.cache.get(ch.guild.id);
+  const st = (flag: bigint): Tri => (ow?.allow.has(flag) ? true : ow?.deny.has(flag) ? false : null);
+  return [st(PermissionFlagsBits.SendMessages), st(PermissionFlagsBits.SendMessagesInThreads), st(PermissionFlagsBits.AddReactions)];
 }
 
+/** Locks, or restores the saved overwrite values (not blindly "inherit", which would erase explicit overwrites). */
+async function setLocked(ch: Lockable, locked: boolean, reason: string | null, saved?: Saved): Promise<void> {
+  const [send, threads, react] = locked ? [false, false, false] : (saved ?? [null, null, null]);
+  await ch.permissionOverwrites.edit(ch.guild.id, { SendMessages: send, SendMessagesInThreads: threads, AddReactions: react }, { reason: reason ?? undefined });
+}
+
+/** Evidence stored on lock/lockdown cases so an unlock can put things back exactly as they were. */
+interface LockEvidence {
+  v: 2;
+  channels: Record<string, Saved>;
+}
+function parseLockEvidence(evidence: string | null): LockEvidence {
+  try {
+    const raw = JSON.parse(evidence ?? '{}') as unknown;
+    if (Array.isArray(raw)) return { v: 2, channels: Object.fromEntries(raw.map((id) => [String(id), [null, null, null] as Saved])) }; // older lockdown cases
+    if (raw && typeof raw === 'object' && (raw as LockEvidence).v === 2) return raw as LockEvidence;
+  } catch {
+    /* fall through */
+  }
+  return { v: 2, channels: {} };
+}
+
+const lockChannelOption = (o: SlashCommandChannelOption) => o.setName('channel').setDescription('Channel').addChannelTypes(...LOCKABLE_TYPES);
+
 const lock = cmd(
-  new SlashCommandBuilder().setName('lock').setDescription('Stop @everyone from sending messages in a channel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels).addChannelOption((o) => o.setName('channel').setDescription('Channel').addChannelTypes(ChannelType.GuildText)).addStringOption(reasonOpt(false)),
+  new SlashCommandBuilder().setName('lock').setDescription('Stop @everyone from sending messages in a channel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels).addChannelOption(lockChannelOption).addStringOption(reasonOpt(false)),
   async (i, ctx) => {
-    const ch = (i.options.getChannel('channel') ?? i.channel) as TextChannel;
+    const ch = i.options.getChannel('channel') ?? i.channel;
+    if (!isLockable(ch)) return i.reply(ephemeral('Choose a text, announcement or forum channel.'));
     const reason = i.options.getString('reason');
+    const evidence: LockEvidence = { v: 2, channels: { [ch.id]: everyoneState(ch) } };
+    // Already locked by us? Keep the original saved state instead of saving the locked one.
+    const existing = await ctx.db.moderationCase.findFirst({ where: { guildId: ctx.guildId, type: 'lock', channelId: ch.id, active: true, deletedAt: null } });
+    if (existing) return i.reply(ephemeral(`<#${ch.id}> is already locked (case #${existing.caseNumber}).`));
     await setLocked(ch, true, reason);
-    await record(ctx, { guildId: ctx.guildId, type: 'lock', moderatorId: i.user.id, channelId: ch.id, reason });
+    await record(ctx, { guildId: ctx.guildId, type: 'lock', moderatorId: i.user.id, channelId: ch.id, reason, evidence: JSON.stringify(evidence) });
     return i.reply(ephemeral(`Locked <#${ch.id}>.`));
   },
 );
 
 const unlock = cmd(
-  new SlashCommandBuilder().setName('unlock').setDescription('Unlock a channel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels).addChannelOption((o) => o.setName('channel').setDescription('Channel').addChannelTypes(ChannelType.GuildText)).addStringOption(reasonOpt(false)),
+  new SlashCommandBuilder().setName('unlock').setDescription('Unlock a channel').setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels).addChannelOption(lockChannelOption).addStringOption(reasonOpt(false)),
   async (i, ctx) => {
-    const ch = (i.options.getChannel('channel') ?? i.channel) as TextChannel;
+    const ch = i.options.getChannel('channel') ?? i.channel;
+    if (!isLockable(ch)) return i.reply(ephemeral('Choose a text, announcement or forum channel.'));
     const reason = i.options.getString('reason');
-    await setLocked(ch, false, reason);
+    const last = await ctx.db.moderationCase.findFirst({ where: { guildId: ctx.guildId, type: 'lock', channelId: ch.id, active: true, deletedAt: null }, orderBy: { createdAt: 'desc' } });
+    await setLocked(ch, false, reason, last ? parseLockEvidence(last.evidence).channels[ch.id] : undefined);
+    if (last) await ctx.db.moderationCase.update({ where: { id: last.id }, data: { active: false } });
     await record(ctx, { guildId: ctx.guildId, type: 'unlock', moderatorId: i.user.id, channelId: ch.id, reason });
     return i.reply(ephemeral(`Unlocked <#${ch.id}>.`));
   },
 );
+
+/** customId is "mod:lockdown:<mode>:<actorId>:<reason>"; Discord caps it at 100 characters, so the reason is trimmed to fit. */
+function lockdownCustomId(mode: 'start' | 'end', actorId: string, reason: string): string {
+  const base = `mod:lockdown:${mode}:${actorId}:`;
+  let r = reason;
+  let enc = encodeURIComponent(r);
+  while (base.length + enc.length > 100 && r.length > 0) {
+    r = r.slice(0, -1);
+    enc = encodeURIComponent(r);
+  }
+  return base + enc;
+}
 
 const lockdown = cmd(
   new SlashCommandBuilder()
@@ -403,9 +481,10 @@ const lockdown = cmd(
   async (i, _ctx) => {
     const start = i.options.getSubcommand() === 'start';
     const reason = (i.options.getString('reason') ?? '').slice(0, 60);
+    const mode = start ? 'start' : 'end';
     return i.reply({
-      content: start ? 'Lock every text channel where @everyone can currently talk? This is logged as a case.' : 'Unlock the channels locked by the last lockdown?',
-      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId(`mod:lockdown:${start ? 'start' : 'end'}:${encodeURIComponent(reason)}`).setLabel(start ? 'Yes, lock down' : 'Yes, unlock').setStyle(start ? ButtonStyle.Danger : ButtonStyle.Success))],
+      content: start ? 'Lock every text, announcement and forum channel where @everyone can currently talk? This is logged as a case.' : 'Unlock the channels locked by the active lockdown?',
+      components: [new ActionRowBuilder<ButtonBuilder>().addComponents(new ButtonBuilder().setCustomId(lockdownCustomId(mode, i.user.id, reason)).setLabel(start ? 'Yes, lock down' : 'Yes, unlock').setStyle(start ? ButtonStyle.Danger : ButtonStyle.Success))],
       flags: 64,
     });
   },
@@ -413,22 +492,44 @@ const lockdown = cmd(
 
 async function runLockdown(ctx: BotContext, actorId: string, start: boolean, reason: string | null): Promise<string> {
   const guild = ctx.requireGuild();
+  const active = await ctx.db.moderationCase.findMany({ where: { guildId: ctx.guildId, type: 'lockdown', active: true, deletedAt: null }, orderBy: { createdAt: 'asc' } });
   if (start) {
-    const channels = guild.channels.cache.filter((c): c is TextChannel => c.type === ChannelType.GuildText && Boolean(c.permissionsFor(guild.roles.everyone)?.has(PermissionFlagsBits.SendMessages)));
-    for (const ch of channels.values()) await setLocked(ch, true, reason).catch(() => undefined);
-    const c = await createCase(ctx.db, { guildId: ctx.guildId, type: 'lockdown', moderatorId: actorId, reason, evidence: JSON.stringify([...channels.keys()]) });
-    await modLog(ctx, c);
-    return `Locked ${channels.size} channel(s) (case #${c.caseNumber}). Use \`/lockdown end\` to undo.`;
+    if (active.length) return `A lockdown is already active (case #${active[0]!.caseNumber}). Use \`/lockdown end\` first.`;
+    const candidates = [...guild.channels.cache.values()].filter((c): c is Lockable => isLockable(c) && Boolean(c.permissionsFor(guild.roles.everyone)?.has(PermissionFlagsBits.SendMessages)));
+    const evidence: LockEvidence = { v: 2, channels: {} };
+    const failed: string[] = [];
+    for (const ch of candidates) {
+      const before = everyoneState(ch);
+      try {
+        await setLocked(ch, true, reason);
+        evidence.channels[ch.id] = before;
+      } catch {
+        failed.push(ch.id);
+      }
+    }
+    const c = await createCase(ctx.db, { guildId: ctx.guildId, type: 'lockdown', moderatorId: actorId, reason, evidence: JSON.stringify(evidence) });
+    await modLog(ctx, c, `**Channels locked:** ${Object.keys(evidence.channels).length}${failed.length ? ` (failed: ${failed.length})` : ''}`);
+    const locked = Object.keys(evidence.channels).length;
+    return `Locked ${locked} channel(s) (case #${c.caseNumber}).${failed.length ? ` Could not lock ${failed.length}: ${failed.slice(0, 10).map((id) => `<#${id}>`).join(' ')}. Check my Manage Channels permission.` : ''} Use \`/lockdown end\` to undo.`;
   }
-  const last = await ctx.db.moderationCase.findFirst({ where: { guildId: ctx.guildId, type: 'lockdown', active: true, deletedAt: null }, orderBy: { createdAt: 'desc' } });
-  if (!last) return 'There is no active lockdown.';
-  const ids = JSON.parse(last.evidence ?? '[]') as string[];
-  for (const id of ids) {
-    const ch = guild.channels.cache.get(id);
-    if (ch?.type === ChannelType.GuildText) await setLocked(ch, false, 'Lockdown ended').catch(() => undefined);
+  if (!active.length) return 'There is no active lockdown.';
+  let unlocked = 0;
+  const failed: string[] = [];
+  for (const last of active) {
+    for (const [id, saved] of Object.entries(parseLockEvidence(last.evidence).channels)) {
+      const ch = guild.channels.cache.get(id);
+      if (!isLockable(ch)) continue; // channel was deleted
+      try {
+        await setLocked(ch, false, 'Lockdown ended', saved);
+        unlocked++;
+      } catch {
+        failed.push(id);
+      }
+    }
+    // Keep the case active if something could not be unlocked, so `/lockdown end` can be retried.
+    if (!failed.length) await ctx.db.moderationCase.update({ where: { id: last.id }, data: { active: false } });
   }
-  await ctx.db.moderationCase.update({ where: { id: last.id }, data: { active: false } });
-  return `Unlocked ${ids.length} channel(s).`;
+  return `Unlocked ${unlocked} channel(s).${failed.length ? ` Could not unlock ${failed.length}: ${failed.slice(0, 10).map((id) => `<#${id}>`).join(' ')}. Run \`/lockdown end\` again after fixing my permissions.` : ''}`;
 }
 
 export async function tickTempbans(ctx: BotContext): Promise<void> {
@@ -451,7 +552,8 @@ export async function handleAutomod(ctx: BotContext, message: Message<true>): Pr
   const hit = tracker.check(message.author.id, message.content, message.mentions.users.size + message.mentions.roles.size, s);
   if (!hit) return false;
   await message.delete().catch(() => undefined);
-  const c = await createCase(ctx.db, { guildId: ctx.guildId, type: 'automod', targetId: message.author.id, moderatorId: message.guild.members.me!.id, reason: `Automod: ${hit.detail}`, channelId: message.channelId });
+  const evidence = (message.content || (message.attachments.size ? `(${message.attachments.size} attachment(s), no text)` : '(no text)')).slice(0, 1500);
+  const c = await createCase(ctx.db, { guildId: ctx.guildId, type: 'automod', targetId: message.author.id, moderatorId: message.guild.members.me!.id, reason: `Automod: ${hit.detail}`, channelId: message.channelId, evidence });
   const alert = textChannel(message.guild, s.alertChannelId ?? mod.settings.modLogChannelId);
   await alert?.send({ content: `Automod removed a message from <@${message.author.id}> in <#${message.channelId}> (${hit.detail}). Case #${c.caseNumber}. Staff decide any further action.`, allowedMentions: { parse: [] } }).catch(() => undefined);
   return true;
@@ -463,8 +565,10 @@ export const moderationModule: BotModule = {
     {
       prefix: 'mod',
       module: 'moderation',
-      async handle(i, ctx, [kind, mode, reason]) {
+      async handle(i, ctx, [kind, mode, actorId, reason]) {
         if (kind !== 'lockdown' || !i.isButton()) return;
+        if (!i.guildId) return i.reply(ephemeral('Use this inside the server.'));
+        if (i.user.id !== actorId) return i.reply(ephemeral('Only the person who ran the command can confirm it. Run it yourself.'));
         if (!ctx.isAdmin(i.member) && !(await ctx.isStaff(i.member))) return i.reply(ephemeral('Only staff can do that.'));
         await i.deferUpdate();
         const text = await runLockdown(ctx, i.user.id, mode === 'start', reason ? decodeURIComponent(reason) || null : null);

@@ -33,7 +33,8 @@ export function containsWholeWord(text: string, word: string): boolean {
   const w = word.trim();
   if (!w) return false;
   // Strip mentions/emoji markup so `<@123>` digits don't matter, keep plain text.
-  const cleaned = text.replace(/<a?:\w+:\d+>|<[@#][!&]?\d+>/g, ' ');
+  // Links are not the member talking to the bot (`https://apple.com/help`).
+  const cleaned = text.replace(/<a?:\w+:\d+>|<[@#][!&]?\d+>/g, ' ').replace(/(?:https?:\/\/|www\.)\S+/gi, ' ');
   return new RegExp(`(?<![\\p{L}\\p{N}_])${escapeRe(w)}(?![\\p{L}\\p{N}_])`, 'iu').test(cleaned);
 }
 
