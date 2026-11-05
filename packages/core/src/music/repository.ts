@@ -88,8 +88,10 @@ export async function enqueueTracks(
 ): Promise<EnqueueResult> {
   return db.$transaction(async (tx) => {
     const session = await lockSession(tx, params.sessionId);
+    // The track at the cursor (now playing) is part of the run: a member whose song is playing
+    // may only queue four more, otherwise they would get six songs in a row.
     const pending = await tx.musicQueueEntry.findMany({
-      where: { sessionId: session.id, position: { gt: session.cursor } },
+      where: { sessionId: session.id, position: { gte: session.cursor } },
       orderBy: { position: 'asc' },
       select: { id: true, requesterId: true },
     });

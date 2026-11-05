@@ -81,12 +81,11 @@ describe('prefix commands', () => {
     expect(replies).toHaveLength(0);
   });
 
-  it('staff-only private replies go to DMs, with a channel fallback that deletes itself', async () => {
+  it('private replies of staff commands are never sent by DM; they stay in the channel and are cleaned up later', async () => {
     const privateWarn: SlashCommand = { ...warn, execute: async (i) => i.reply({ content: 'secret', flags: MessageFlags.Ephemeral }) };
     const { message, replies } = fakeMessage('');
     await runPrefixCommand({} as never, message as never, { cmd: privateWarn, name: 'warn', args: `<@${ALICE}> x` }, '+', false);
-    expect(message.author.send).toHaveBeenCalled();
-    // DMs closed (send returned null) → falls back to a channel reply.
+    expect(message.author.send).not.toHaveBeenCalled();
     expect(replies[0]).toMatchObject({ content: 'secret' });
     expect((replies[0] as { flags?: number }).flags).toBeUndefined();
   });

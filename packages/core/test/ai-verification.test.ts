@@ -66,6 +66,9 @@ describe('AI triggers', () => {
   });
   it('uses real word boundaries (no pineapple, no helpful)', () => {
     expect(containsWholeWord('I like pineapple', 'apple')).toBe(false);
+    // Pasted links are not the member addressing the bot.
+    expect(containsWholeWord('see https://apple.com/help for details', 'apple')).toBe(false);
+    expect(containsWholeWord('see https://apple.com/help and apple support', 'apple')).toBe(true);
     expect(containsWholeWord('that was helpful', 'help')).toBe(false);
     expect(containsWholeWord('apple-pie', 'apple')).toBe(true);
     expect(containsWholeWord('need help!', 'help')).toBe(true);

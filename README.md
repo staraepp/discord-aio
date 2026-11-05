@@ -100,7 +100,7 @@ Which optional services run is set by `COMPOSE_PROFILES` in `.env` (`tunnel` for
 3. **Public hostname**: subdomain `bot`, domain `prismshade.fun` (or yours), service type `HTTP`, URL `web:3000`. Cloudflare creates the DNS record itself; don't add an A record.
 4. Set `PUBLIC_BASE_URL=https://<that hostname>`, `DISCORD_REDIRECT_URI=https://<that hostname>/api/auth/callback/discord`, `TRUST_PROXY=cloudflare` and `COMPOSE_PROFILES=tunnel` (plus `,music` if you use Lavalink).
 
-`TRUST_PROXY=cloudflare` makes rate limits use the visitor IP Cloudflare reports. Only set it when the tunnel is the only way to reach the dashboard. Without a tunnel, put the dashboard behind an HTTPS reverse proxy instead (publish `127.0.0.1:3000:3000` in a compose override). Cookies are marked `Secure` automatically for https URLs.
+`TRUST_PROXY=cloudflare` makes rate limits use the visitor IP Cloudflare reports. Only set it when the tunnel is the only way to reach the dashboard. Without a tunnel, put the dashboard behind an HTTPS reverse proxy instead (publish `127.0.0.1:3000:3000` in a compose override) and set `TRUST_PROXY=proxy`. The default `none` ignores forwarding headers, so all visitors share one rate-limit bucket. Cookies are marked `Secure` automatically for https URLs.
 
 Optional extra layer: a Cloudflare Access policy on the `/dashboard` path (allow only your email). Don't put Access in front of `/f/`, `/verify/`, `/api/public/` or `/api/auth/`; those must stay reachable.
 

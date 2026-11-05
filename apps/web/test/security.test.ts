@@ -58,8 +58,10 @@ describe('client IP for rate limits', () => {
   });
 
   it('never uses the client-supplied first X-Forwarded-For entry', () => {
-    expect(pickClientIp(headers({ 'x-forwarded-for': '6.6.6.6, 198.51.100.4' }), 'none')).toBe('198.51.100.4');
-    expect(pickClientIp(headers({ 'x-real-ip': '198.51.100.7', 'x-forwarded-for': '6.6.6.6' }), 'none')).toBe('198.51.100.7');
-    expect(pickClientIp(headers({}), 'none')).toBe('unknown');
+    expect(pickClientIp(headers({ 'x-forwarded-for': '6.6.6.6, 198.51.100.4' }), 'proxy')).toBe('198.51.100.4');
+    expect(pickClientIp(headers({ 'x-real-ip': '198.51.100.7', 'x-forwarded-for': '6.6.6.6' }), 'proxy')).toBe('198.51.100.7');
+    expect(pickClientIp(headers({}), 'proxy')).toBe('unknown');
+    // With no trusted proxy, client-sent headers must never pick the rate-limit bucket.
+    expect(pickClientIp(headers({ 'x-real-ip': '9.9.9.9', 'x-forwarded-for': '8.8.8.8', 'cf-connecting-ip': '7.7.7.7' }), 'none')).toBe('unknown');
   });
 });

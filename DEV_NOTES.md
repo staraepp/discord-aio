@@ -6,7 +6,7 @@ Decisions made where `BLUEPRINT.md` left room, plus the places where the impleme
 
 - **Single writer to Discord.** The dashboard never calls mutating Discord endpoints. It writes to PostgreSQL and enqueues a `DashboardCommand`; the bot claims commands with `FOR UPDATE SKIP LOCKED`, is woken by `LISTEN/NOTIFY` (with 5 s polling as fallback), and re-queues commands that were in progress during a crash. The dashboard waits up to ~8 s for a result and otherwise says the change is queued; it never reports success it did not observe.
 - **Read-only Discord REST in the web app** (bot token, server-side only) for the admin check and channel/role pickers. Results are cached 30–60 s. When Discord cannot be reached, pickers fall back to typed IDs, which are still checked for format server-side and fully re-checked by the bot.
-- **Ingress is Cloudflare Tunnel.** The `web` container publishes no ports; `cloudflared` (compose profile `tunnel`) is the only way in. With `TRUST_PROXY=cloudflare` the rate-limit IP comes from `CF-Connecting-IP`. Otherwise it uses `X-Real-IP` or the last `X-Forwarded-For` entry, never the client-supplied first entry.
+- **Ingress is Cloudflare Tunnel.** The `web` container publishes no ports; `cloudflared` (compose profile `tunnel`) is the only way in. With `TRUST_PROXY=cloudflare` the rate-limit IP comes from `CF-Connecting-IP`. `TRUST_PROXY=proxy` (your own reverse proxy) uses `X-Real-IP` or the last `X-Forwarded-For` entry, never the client-supplied first entry. The default `none` ignores all forwarding headers (one shared bucket) so a direct client cannot dodge rate limits by faking an IP.
 - **Rate limiting is in-process** (one bot process, one web process by design). Running several web replicas would need a shared limiter.
 - **Shared packages use extensionless relative imports** (`moduleResolution: Bundler`) so that Next.js/Turbopack, tsup and Vitest all resolve the TypeScript sources directly.
 - Prisma 7 with the `prisma-client` generator and the `pg` driver adapter. The AI full-text-search column is a `tsvector` maintained by a trigger created in the initial migration.
@@ -23,7 +23,7 @@ Decisions made where `BLUEPRINT.md` left room, plus the places where the impleme
 
 ## Music
 
-- **"Five in a row"** is counted on the tail of the pending queue: an ordinary member may not have more than N (default 5) consecutive pending entries. Playlists add the subset that fits and say how many were skipped. Staff, and anyone queueing in a temporary room, bypass it.
+- **"Five in a row"** is counted on the tail of the queue, including the track that is playing now: an ordinary member may not have more than N (default 5) consecutive pending entries. Playlists add the subset that fits and say how many were skipped. Staff, and anyone queueing in a temporary room, bypass it.
 - **Previous** moves the timeline cursor back one track. If playback has finished, it replays the last track.
 - **Jump** (staff only) moves the chosen track to the front and skips to it; the rest of the queue keeps its order.
 - Ordinary members can skip, pause, resume, seek and go back only while their own track is playing. The owner of a temporary room has staff-level music control inside that room.
@@ -41,6 +41,10 @@ Decisions made where `BLUEPRINT.md` left room, plus the places where the impleme
 - Turnstile runs in a browser, so choosing it keeps the one-time web link flow.
 - If Turnstile is selected but its keys are missing, the picture code is used. A Turnstile outage returns an error without counting as a failed attempt.
 - Role changes after passing are applied by the bot. If the bot is offline, the success is recorded with `pendingRoleSync` and applied on startup.
+- Prefix-command (`+warn`, `+lockdown`...) private replies are never sent by DM; they are posted in the channel and removed after 2 minutes (20 s for other modules). A DM'd confirm button cannot work outside the server and DMs risk another quarantine.
+- Moderation deletions keep evidence: automod stores the removed message text on its case, purge stores a per-message snapshot. Lock and lockdown cases store each channel's previous @everyone overwrite so unlocking restores it exactly. Only one lockdown can be active at a time.
+- Kick, softban and ban check `kickable`/`bannable` before DMing, so nobody is told about an action Discord will refuse.
+- The `/embed` editor is a normal channel message (not ephemeral) so staff can see it; only the staff member who opened it can use its buttons.
 - Passing never sends a DM. The private reply or the web page is the confirmation. On 2026-10-14 Discord quarantined the bot for "many unsolicited DMs in a short period" (60 to 80 success DMs an hour), and the Developer Policy forbids frequent unsolicited DMs. Do not add one back.
 - Honeypot catches never send a DM either (removed on 2026-10-15 for the same reason; trapped accounts are mostly spam and report DMs). Staff learn about a catch from the log channel and moderation case.
 
